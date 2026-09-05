@@ -23,7 +23,7 @@ services:
       - "traefik.http.routers.gigahub-mobile.entrypoints=websecure"
       - "traefik.http.routers.gigahub-mobile.rule=Host(`mobile.gigahub.site`)"
       - "traefik.http.routers.gigahub-mobile.tls.certresolver=letsencrypt"
-      - "traefik.http.services.gigahub-mobile.loadbalancer.server.port=80"
+      - "traefik.http.services.gigahub-mobile.loadbalancer.server.port=3200"
 
 networks:
   gigahub-network:
