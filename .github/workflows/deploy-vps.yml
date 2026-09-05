@@ -1,0 +1,76 @@
+name: Deploy Mobile VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-mobile-vps
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Mobile to VPS (Docker Compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH na VPS Hostinger
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST || '2.25.114.101' }}
+          username: ${{ secrets.VPS_USERNAME || 'root' }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -e
+            echo "=================================================="
+            echo "🚀 Iniciando deploy do GigaHub Mobile na VPS"
+            echo "=================================================="
+
+            DEPLOY_DIR="/opt/gigahub-mobile"
+            REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/williantessaro/gigahub-mobile.git"
+
+            # Clona o repositório se for a primeira execução
+            if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              echo "📁 Clonando repositório em $DEPLOY_DIR..."
+              mkdir -p "$DEPLOY_DIR"
+              git clone "$REPO_URL" "$DEPLOY_DIR"
+            fi
+
+            cd "$DEPLOY_DIR"
+
+            echo "📥 Atualizando código-fonte na branch main..."
+            git remote set-url origin "$REPO_URL"
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "🐳 Construindo imagem e subindo contêiner gigahub-mobile..."
+            docker compose build --no-cache gigahub-mobile
+            docker compose up -d --force-recreate gigahub-mobile
+
+            echo "🔄 Atualizando Traefik para roteamento de mobile.gigahub.site..."
+            docker restart $(docker ps -q --filter "name=traefik") || true
+
+            echo "⏳ Aguardando inicialização do serviço..."
+            sleep 5
+
+            echo "📊 Status dos contêineres:"
+            docker ps --filter "name=gigahub-mobile"
+
+            echo "🧹 Limpando camadas e imagens antigas..."
+            docker image prune -f --filter "until=72h" || true
+
+            echo "=================================================="
+            echo "✅ Container GigaHub Mobile ativo em mobile.gigahub.site!"
+            echo "=================================================="

@@ -1,0 +1,15 @@
+{
+  "appId": "site.gigahub.app",
+  "appName": "GigaHub",
+  "webDir": "dist",
+  "server": {
+    "url": "https://mobile.gigahub.site",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
