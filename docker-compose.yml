@@ -10,6 +10,8 @@ services:
     restart: unless-stopped
     networks:
       - gigahub-network
+    ports:
+      - "3200:80"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
       interval: 30s
@@ -21,7 +23,7 @@ services:
       - "traefik.docker.network=gigahub-network"
       - "traefik.http.routers.mobile.entrypoints=websecure"
       - "traefik.http.routers.mobile.rule=Host(`mobile.gigahub.site`)"
-      - "traefik.http.routers.mobile.tls=true"
+      - "traefik.http.routers.mobile.service=mobile"
       - "traefik.http.routers.mobile.tls.certresolver=letsencrypt"
       - "traefik.http.services.mobile.loadbalancer.server.port=80"
 
