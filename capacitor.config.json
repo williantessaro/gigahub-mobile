@@ -3,8 +3,8 @@
   "appName": "GigaHub",
   "webDir": "dist",
   "server": {
-    "url": "https://mobile.gigahub.site",
-    "cleartext": false,
+    "url": "https://app.gigahub.site/mobile",
+    "cleartext": true,
     "androidScheme": "https"
   },
   "plugins": {
