@@ -1,35 +1,57 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-// Listas canônicas padrão para cada funil (caso o banco não tenha customizações ainda)
-const DEFAULT_VENDAS_LISTS = [
-  { id: 'Novo Lead', name: 'Novo Lead', color: '#38bdf8', icon: 'fiber_new' },
-  { id: 'Situação (Respondeu)', name: 'Situação (Respondeu)', color: '#eab308', icon: 'explore' },
-  { id: 'Problema (P)', name: 'Problema (P)', color: '#818cf8', icon: 'error_outline' },
-  { id: 'Solução (N)', name: 'Solução (N)', color: '#2dd4bf', icon: 'lightbulb' },
-  { id: 'Fechado / Cliente', name: 'Fechado / Cliente', color: '#22c55e', icon: 'check_circle' }
+// Listas canônicas padrão para fallback caso a API ainda não tenha retornado
+const CANONICAL_FUNNELS = [
+  { id: 'VENDAS', nome: 'Vendas' },
+  { id: 'POS_VENDAS', nome: 'Pós-Vendas' }
 ];
 
-const DEFAULT_POS_VENDAS_LISTS = [
-  { id: 'Boas-vindas', name: 'Boas-vindas', color: '#38bdf8', icon: 'waving_hand' },
+const DEFAULT_VENDAS_STAGES = [
+  { id: 'Novo', name: 'Novo', color: '#3b82f6', icon: 'fiber_new' },
+  { id: 'Situação', name: 'Situação (S)', color: '#f59e0b', icon: 'explore' },
+  { id: 'Problema', name: 'Problema (P)', color: '#6366f1', icon: 'error_outline' },
+  { id: 'Implicação', name: 'Implicação (I)', color: '#ec4899', icon: 'trending_down' },
+  { id: 'Solução', name: 'Solução (N)', color: '#14b8a6', icon: 'lightbulb' },
+  { id: 'Fechado', name: 'Fechado / Cliente', color: '#16a34a', icon: 'check_circle' },
+  { id: 'Perdido', name: 'Perdido / Arquivado', color: '#64748b', icon: 'cancel' }
+];
+
+const DEFAULT_POS_VENDAS_STAGES = [
+  { id: 'Boas-vindas', name: 'Boas-vindas', color: '#3b82f6', icon: 'waving_hand' },
   { id: 'Integração', name: 'Integração', color: '#f59e0b', icon: 'supervised_user_circle' },
   { id: 'Configuração', name: 'Configuração', color: '#6366f1', icon: 'settings_suggest' },
   { id: 'Concluído', name: 'Concluído', color: '#16a34a', icon: 'check_circle' }
 ];
 
 export default function MobileKanban({ onNavigate, onModalStateChange }) {
-  // Separador de FUNIL: 'vendas' ou 'clientes-inicio' (Pós-Venda)
-  const [activeFunnel, setActiveFunnel] = useState('vendas');
+  // Funis dinâmicos
+  const [availableFunnels, setAvailableFunnels] = useState(CANONICAL_FUNNELS);
+  const [currentFunnelId, setCurrentFunnelId] = useState('VENDAS');
+  const [isCreatingFunnel, setIsCreatingFunnel] = useState(false);
+  const [newFunnelName, setNewFunnelName] = useState('');
 
-  // Categorizador de LISTAS do funil ativo
-  const [lists, setLists] = useState(DEFAULT_VENDAS_LISTS);
-  const [selectedListId, setSelectedListId] = useState('Novo Lead');
+  // Colunas / Estágios do Funil Ativo
+  const [stages, setStages] = useState(DEFAULT_VENDAS_STAGES);
+  const [isCreatingStage, setIsCreatingStage] = useState(false);
+  const [newStageName, setNewStageName] = useState('');
+
+  // Leads e Busca
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [transferringId, setTransferringId] = useState(null);
+  const [draggedLead, setDraggedLead] = useState(null);
 
-  // Estados do Chat Integrado do Lead (Slide-Over / Modal Completo)
-  const [activeChatLead, setActiveChatLead] = useState(null);
+  // Menu Rápido de Mover Etapa
+  const [quickMoveLead, setQuickMoveLead] = useState(null);
+
+  // Modal Completo de Detalhes do Lead (Abas: Chat e Dados)
+  const [activeModalLead, setActiveModalLead] = useState(null);
+  const [modalTab, setModalTab] = useState('chat'); // 'chat' | 'details'
+  const [editedLeadData, setEditedLeadData] = useState({});
+  const [isSavingLead, setIsSavingLead] = useState(false);
+
+  // Chat integrado
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInputText, setChatInputText] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
@@ -37,7 +59,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
   const chatEndRef = useRef(null);
   const chatPollRef = useRef(null);
 
-  // Estados de Agendamento de Mensagem
+  // Agendamento de Mensagem
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
@@ -45,7 +67,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleMsgStatus, setScheduleMsgStatus] = useState('');
 
-  // Estados de Gravação de Áudio
+  // Gravador de Áudio
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef(null);
@@ -61,72 +83,403 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     };
   };
 
-  // Notifica o App se algum modal estiver aberto (para botão Voltar do Android)
+  // Notifica o App se algum modal estiver aberto (para controle do botão Voltar nativo do Android)
   useEffect(() => {
     if (onModalStateChange) {
-      onModalStateChange(Boolean(activeChatLead || isScheduleOpen));
+      onModalStateChange(Boolean(activeModalLead || isScheduleOpen || quickMoveLead || isCreatingFunnel || isCreatingStage));
     }
-  }, [activeChatLead, isScheduleOpen, onModalStateChange]);
+  }, [activeModalLead, isScheduleOpen, quickMoveLead, isCreatingFunnel, isCreatingStage, onModalStateChange]);
 
+  // Carregar lista de funis da API
+  const loadFunnelsList = async () => {
+    try {
+      const res = await fetch('/backend/api/funis', { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setAvailableFunnels(data);
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao buscar lista de funis:', err);
+    }
+  };
+
+  // Carregar colunas e leads reais
   const loadData = async (isBackground = false) => {
     if (!isBackground) setLoading(true);
     try {
-      const currentOrigem = activeFunnel === 'clientes-inicio' ? 'clientes-inicio' : 'gigacrm';
+      // 1. Buscar as colunas/listas reais cadastradas para o funil ativo
+      const resListas = await fetch(`/backend/api/listas?funil_id=${currentFunnelId}`, {
+        headers: getAuthHeaders()
+      });
 
-      // 1. Carregar as LISTAS reais do banco de dados para o Funil ativo
-      const stRes = await fetch(`/backend/api/statuses?origem=${currentOrigem}`, { headers: getAuthHeaders() });
-      let loadedLists = [];
-      if (stRes.ok) {
-        const stData = await stRes.json();
-        if (Array.isArray(stData) && stData.length > 0) {
-          loadedLists = stData.map(s => ({
-            id: s.id || s.label,
-            name: s.label || s.name || s.id,
-            color: s.bg || s.color || '#38bdf8',
-            icon: s.icon || 'list'
+      if (resListas.ok) {
+        const listas = await resListas.json();
+        if (Array.isArray(listas) && listas.length > 0) {
+          const mapped = listas.map(s => ({
+            id: s.id,
+            name: s.nome || s.label || s.id,
+            color: s.cor || s.bg || '#3b82f6',
+            icon: s.icon || 'view_kanban'
           }));
+          setStages(mapped);
+        } else {
+          if (currentFunnelId === 'POS_VENDAS') {
+            setStages(DEFAULT_POS_VENDAS_STAGES);
+          } else {
+            setStages(DEFAULT_VENDAS_STAGES);
+          }
+        }
+      } else {
+        if (currentFunnelId === 'POS_VENDAS') {
+          setStages(DEFAULT_POS_VENDAS_STAGES);
+        } else {
+          setStages(DEFAULT_VENDAS_STAGES);
         }
       }
 
-      if (loadedLists.length === 0) {
-        loadedLists = activeFunnel === 'clientes-inicio' ? DEFAULT_POS_VENDAS_LISTS : DEFAULT_VENDAS_LISTS;
-      }
-
-      setLists(loadedLists);
-      setSelectedListId(prev => {
-        const exists = loadedLists.some(l => l.id === prev);
-        return exists ? prev : loadedLists[0].id;
+      // 2. Buscar todas as pessoas/leads cadastradas (origem=gigacrm)
+      const resPessoas = await fetch('/backend/api/pessoas?origem=gigacrm', {
+        headers: getAuthHeaders()
       });
 
-      // 2. Carregar pessoas/leads reais do banco de dados
-      const res = await fetch('/backend/api/pessoas?origem=gigacrm', { headers: getAuthHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        const activeLeads = Array.isArray(data) ? data.filter(p => 
-          p.status !== 'Arquivado' && 
-          p.status !== 'arquivado'
-        ) : [];
-        setLeads(activeLeads);
+      if (resPessoas.ok) {
+        const data = await resPessoas.json();
+        const targetFunilUpper = String(currentFunnelId || 'VENDAS').toUpperCase();
+        const isPosVendas = targetFunilUpper === 'POS_VENDAS';
+        const isVendas = targetFunilUpper === 'VENDAS';
+
+        // Lógica de filtragem 100% idêntica ao Funnel.jsx do Desktop
+        const filtered = (Array.isArray(data) ? data : []).filter(p => {
+          if (p.arquivado === 1 || p.status === 'Arquivado' || p.lista === 'Arquivado') return false;
+          if (isPosVendas && (p.arquivado_clientes === 1 || p.arquivado === 1)) return false;
+          if (isVendas && (p.arquivado_vendas === 1 || p.arquivado === 1)) return false;
+
+          const leadFunilUpper = String(p.funil || 'VENDAS').toUpperCase();
+          return leadFunilUpper === targetFunilUpper;
+        });
+
+        setLeads(filtered);
       }
     } catch (err) {
-      console.error('Erro ao sincronizar listas e funil do CRM:', err);
+      console.error('Erro ao sincronizar dados do funil:', err);
     } finally {
       if (!isBackground) setLoading(false);
     }
   };
 
   useEffect(() => {
+    loadFunnelsList();
+  }, []);
+
+  useEffect(() => {
     loadData();
 
-    // Sincronização contínua em tempo real
+    // Sincronização contínua a cada 8 segundos (polling em background)
     const interval = setInterval(() => {
       loadData(true);
     }, 8000);
 
     return () => clearInterval(interval);
-  }, [activeFunnel]);
+  }, [currentFunnelId]);
 
-  // Mensagens do Chat Integrado do Lead
+  // Filtragem de leads para cada coluna (fidedigno ao desktop)
+  const getLeadsForStage = (stageId) => {
+    const firstStage = stages[0]?.id;
+
+    return leads.filter(l => {
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        const matchesName = (l.nome || '').toLowerCase().includes(term);
+        const matchesPhone = (l.whatsapp || '').includes(searchTerm.trim());
+        const matchesStore = (l.nome_loja || '').toLowerCase().includes(term);
+        if (!matchesName && !matchesPhone && !matchesStore) {
+          return false;
+        }
+      }
+
+      const currentLista = l.lista || l.status || firstStage;
+      const statusMatchesStage = (sId) => String(currentLista || '').toLowerCase() === String(sId).toLowerCase();
+
+      if (stageId === firstStage) {
+        return statusMatchesStage(stageId) || currentLista === 'ENVIADO' || !l.lista || !stages.some(s => statusMatchesStage(s.id));
+      }
+      return statusMatchesStage(stageId);
+    });
+  };
+
+  // Mover lead para outra coluna dentro do funil atual
+  const handleMoveStage = async (lead, targetStageId) => {
+    if (!lead || !targetStageId) return;
+
+    // Atualização otimista na interface
+    setLeads(prev => prev.map(l =>
+      l.id === lead.id ? { ...l, lista: targetStageId, status: targetStageId } : l
+    ));
+
+    if (activeModalLead && activeModalLead.id === lead.id) {
+      setActiveModalLead(prev => ({ ...prev, lista: targetStageId, status: targetStageId }));
+    }
+
+    setQuickMoveLead(null);
+
+    try {
+      const res = await fetch('/backend/api/leads/lista', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          id: lead.id,
+          lead_id: lead.id,
+          whatsapp: lead.whatsapp,
+          lista: targetStageId,
+          status: targetStageId,
+          origem: lead.origem || 'gigacrm',
+          funnelType: currentFunnelId
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error('Falha ao atualizar lista no servidor.');
+      }
+      loadData(true);
+    } catch (err) {
+      console.error('Erro ao atualizar etapa do lead:', err);
+      loadData(true);
+    }
+  };
+
+  // Transferir lead para outro funil (ex: VENDAS ➔ POS_VENDAS)
+  const handleTransferFunnel = async (e, lead) => {
+    e.stopPropagation();
+
+    const isPosVendas = currentFunnelId === 'POS_VENDAS';
+    const targetFunnel = isPosVendas ? 'VENDAS' : 'POS_VENDAS';
+    const targetLabel = isPosVendas ? 'Funil de Vendas' : 'Pós-Vendas (Clientes)';
+
+    if (!window.confirm(`Deseja transferir "${lead.nome || lead.whatsapp}" para o funil "${targetLabel}"?`)) {
+      return;
+    }
+
+    setTransferringId(lead.id);
+
+    // Otimista: remove do funil atual
+    setLeads(prev => prev.filter(l => l.id !== lead.id));
+
+    try {
+      // Buscar primeira coluna do funil destino
+      let firstStageId = targetFunnel === 'POS_VENDAS' ? 'Boas-vindas' : 'Novo';
+      try {
+        const stRes = await fetch(`/backend/api/listas?funil_id=${targetFunnel}`, { headers: getAuthHeaders() });
+        if (stRes.ok) {
+          const stData = await stRes.json();
+          if (Array.isArray(stData) && stData.length > 0) {
+            firstStageId = stData[0].id;
+          }
+        }
+      } catch (stErr) {
+        console.warn('Usando coluna padrão para transferência de funil');
+      }
+
+      const res = await fetch('/backend/api/leads/status', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          id: lead.id,
+          lead_id: lead.id,
+          whatsapp: lead.whatsapp,
+          status: firstStageId,
+          lista: firstStageId,
+          origem: lead.origem || 'gigacrm',
+          funnelType: targetFunnel
+        })
+      });
+
+      if (res.ok) {
+        loadData(true);
+      } else {
+        alert('Erro ao transferir lead de funil no servidor.');
+        loadData();
+      }
+    } catch (err) {
+      console.error('Erro ao transferir lead de funil:', err);
+      alert('Falha ao conectar no servidor.');
+      loadData();
+    } finally {
+      setTransferringId(null);
+    }
+  };
+
+  // Arquivar card/lead
+  const handleArchiveCard = async (e, lead) => {
+    e.stopPropagation();
+
+    if (!window.confirm(`Deseja arquivar o contato "${lead.nome || lead.whatsapp}"? Ele não aparecerá mais no quadro.`)) {
+      return;
+    }
+
+    // Otimista: remove do quadro
+    setLeads(prev => prev.filter(l => l.id !== lead.id));
+
+    try {
+      await fetch('/backend/api/leads/status', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          id: lead.id,
+          lead_id: lead.id,
+          whatsapp: lead.whatsapp,
+          status: 'Arquivado',
+          lista: 'Arquivado',
+          origem: lead.origem || 'gigacrm',
+          funnelType: currentFunnelId
+        })
+      });
+
+      if (lead.whatsapp) {
+        await fetch(`/backend/api/chats/${lead.whatsapp}/archive?origem=gigacrm`, {
+          method: 'POST',
+          headers: getAuthHeaders()
+        }).catch(() => {});
+      }
+
+      loadData(true);
+    } catch (err) {
+      console.error('Erro ao arquivar card:', err);
+      loadData();
+    }
+  };
+
+  // Criar Novo Funil
+  const handleCreateFunnelSubmit = async (e) => {
+    e.preventDefault();
+    const nomeTrim = newFunnelName.trim();
+    if (!nomeTrim) return;
+
+    const id = nomeTrim.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    try {
+      const res = await fetch('/backend/api/funis', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ id, nome: nomeTrim, ordem: availableFunnels.length })
+      });
+
+      if (res.ok) {
+        // Criar lista inicial 'Novo'
+        await fetch('/backend/api/listas', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            id: 'Novo_' + id,
+            funil_id: id,
+            nome: 'Novo',
+            ordem: 0,
+            cor: '#3b82f6',
+            icon: 'fiber_new'
+          })
+        }).catch(() => {});
+
+        setNewFunnelName('');
+        setIsCreatingFunnel(false);
+        await loadFunnelsList();
+        setCurrentFunnelId(id);
+      } else {
+        alert('Erro ao criar funil no servidor.');
+      }
+    } catch (err) {
+      console.error('Erro ao salvar funil:', err);
+      alert('Falha na comunicação com o servidor.');
+    }
+  };
+
+  // Criar Nova Coluna / Lista no Funil Ativo
+  const handleCreateStageSubmit = async (e) => {
+    e.preventDefault();
+    const labelTrim = newStageName.trim();
+    if (!labelTrim) return;
+
+    const id = labelTrim.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now().toString().slice(-4);
+    const colors = ['#3b82f6', '#f59e0b', '#6366f1', '#ec4899', '#14b8a6', '#8b5cf6', '#10b981'];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+    try {
+      const res = await fetch('/backend/api/listas', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          id,
+          nome: labelTrim,
+          funil_id: currentFunnelId,
+          ordem: stages.length,
+          cor: randomColor,
+          icon: 'view_kanban'
+        })
+      });
+
+      if (res.ok) {
+        setNewStageName('');
+        setIsCreatingStage(false);
+        loadData(true);
+      } else {
+        alert('Erro ao criar nova coluna.');
+      }
+    } catch (err) {
+      console.error('Erro ao criar nova coluna:', err);
+      alert('Falha de conexão.');
+    }
+  };
+
+  // Abertura do Modal de Detalhes Completo
+  const openLeadModal = (lead) => {
+    setActiveModalLead(lead);
+    setModalTab('chat');
+    setEditedLeadData({
+      nome: lead.nome || '',
+      nome_loja: lead.nome_loja || '',
+      whatsapp: lead.whatsapp || '',
+      email: lead.email || '',
+      cidade: lead.cidade || '',
+      categoria: lead.categoria || lead.description || '',
+      description: lead.description || lead.categoria || '',
+      status: lead.status || lead.lista || stages[0]?.id
+    });
+  };
+
+  // Salvar Alterações dos Dados do Lead
+  const handleSaveLeadDetails = async (e) => {
+    e.preventDefault();
+    if (!activeModalLead) return;
+
+    setIsSavingLead(true);
+    try {
+      const res = await fetch(`/backend/api/pessoas/${activeModalLead.id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(editedLeadData)
+      });
+
+      if (res.ok) {
+        // Se a etapa mudou pelo dropdown, dispara atualização no funil
+        if (editedLeadData.status && editedLeadData.status !== (activeModalLead.status || activeModalLead.lista)) {
+          await handleMoveStage(activeModalLead, editedLeadData.status);
+        }
+
+        // Atualiza objeto em foco
+        setActiveModalLead(prev => ({ ...prev, ...editedLeadData }));
+        loadData(true);
+        alert('✅ Dados do contato salvos com sucesso!');
+      } else {
+        alert('Erro ao salvar os dados do contato.');
+      }
+    } catch (err) {
+      console.error('Erro ao salvar contato:', err);
+      alert('Falha de comunicação ao salvar contato.');
+    } finally {
+      setIsSavingLead(false);
+    }
+  };
+
+  // Carregamento de Mensagens do WhatsApp
   const loadChatMessages = async (phone, isPolling = false) => {
     if (!phone) return;
     if (!isPolling) setChatLoading(true);
@@ -134,23 +487,26 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     try {
       const cleanPhone = String(phone).replace(/\D/g, '');
       const jid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
-      const res = await fetch(`/backend/api/chats/${jid}/messages?origem=gigacrm`, { headers: getAuthHeaders() });
+      const res = await fetch(`/backend/api/chats/${jid}/messages?origem=gigacrm`, {
+        headers: getAuthHeaders()
+      });
+
       if (res.ok) {
         const msgs = await res.json();
         setChatMessages(Array.isArray(msgs) ? msgs : []);
       }
     } catch (err) {
-      console.error('Erro ao carregar mensagens do lead:', err);
+      console.error('Erro ao carregar mensagens:', err);
     } finally {
       if (!isPolling) setChatLoading(false);
     }
   };
 
   useEffect(() => {
-    if (activeChatLead) {
-      loadChatMessages(activeChatLead.whatsapp);
+    if (activeModalLead && modalTab === 'chat') {
+      loadChatMessages(activeModalLead.whatsapp);
       chatPollRef.current = setInterval(() => {
-        loadChatMessages(activeChatLead.whatsapp, true);
+        loadChatMessages(activeModalLead.whatsapp, true);
       }, 3500);
     } else {
       if (chatPollRef.current) clearInterval(chatPollRef.current);
@@ -160,144 +516,24 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     return () => {
       if (chatPollRef.current) clearInterval(chatPollRef.current);
     };
-  }, [activeChatLead]);
+  }, [activeModalLead, modalTab]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
-
-  // Mapeamento fidedigno do Lead para a LISTA do Funil selecionado
-  const matchLeadToList = (lead, listId) => {
-    const isClientesInicio = activeFunnel === 'clientes-inicio';
-    const firstListId = lists[0]?.id;
-
-    if (isClientesInicio) {
-      // Pertence ao Funil de Pós-Venda
-      if (lead.funil !== 'clientes-inicio') return false;
-      if (lead.arquivado_clientes === 1) return false;
-
-      const rawStatus = (lead.status || firstListId || 'Boas-vindas').trim().toLowerCase();
-      const targetList = String(listId).trim().toLowerCase();
-
-      if (listId === firstListId || targetList.includes('boas-vindas') || targetList.includes('inicio')) {
-        return rawStatus === targetList || !lead.status || !lists.some(l => rawStatus === l.id.toLowerCase());
-      }
-      return rawStatus === targetList;
-    } else {
-      // Pertence ao Funil de Vendas (padrão)
-      if (lead.funil && lead.funil !== 'vendas') return false;
-      if (lead.arquivado_vendas === 1) return false;
-
-      const rawStatus = (lead.status || firstListId || 'Novo Lead').trim().toLowerCase();
-      const targetList = String(listId).trim().toLowerCase();
-
-      if (listId === firstListId || targetList.includes('novo')) {
-        return (
-          rawStatus === 'novo lead' ||
-          rawStatus === 'novo' ||
-          rawStatus === 'enviado' ||
-          !lead.status ||
-          !lists.some(l => rawStatus === l.id.toLowerCase() || rawStatus === l.name.toLowerCase())
-        );
-      }
-
-      if (targetList.includes('situa') || targetList.includes('respondeu')) {
-        return rawStatus.includes('situa') || rawStatus.includes('respondeu');
-      }
-
-      if (targetList.includes('problema')) return rawStatus.includes('problema');
-      if (targetList.includes('implica')) return rawStatus.includes('implica');
-      if (targetList.includes('solu')) return rawStatus.includes('solu');
-      if (targetList.includes('fechado') || targetList.includes('cliente') || targetList.includes('ganho')) {
-        return rawStatus.includes('fechado') || rawStatus.includes('cliente') || rawStatus.includes('ganho');
-      }
-      if (targetList.includes('perdido')) return rawStatus.includes('perdido');
-
-      return rawStatus === targetList;
+    if (modalTab === 'chat') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  };
+  }, [chatMessages, modalTab]);
 
-  const getLeadsForList = (listId) => {
-    return leads.filter(lead => {
-      if (searchTerm.trim()) {
-        const term = searchTerm.toLowerCase();
-        const matchesName = (lead.nome || '').toLowerCase().includes(term);
-        const matchesPhone = (lead.whatsapp || '').includes(term);
-        const matchesStore = (lead.nome_loja || '').toLowerCase().includes(term);
-        if (!matchesName && !matchesPhone && !matchesStore) return false;
-      }
-      return matchLeadToList(lead, listId);
-    });
-  };
-
-  // Mover lead entre LISTAS do mesmo funil
-  const handleMoveList = async (leadId, newListId) => {
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newListId } : l));
-    if (activeChatLead && activeChatLead.id === leadId) {
-      setActiveChatLead(prev => ({ ...prev, status: newListId }));
-    }
-
-    try {
-      await fetch(`/backend/api/pessoas/${leadId}`, {
-        method: 'PATCH',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ status: newListId })
-      });
-      loadData(true);
-    } catch (err) {
-      console.error('Erro ao atualizar lista do lead:', err);
-    }
-  };
-
-  // Flechinha (➔ / ←) para transferir o Lead para o outro FUNIL
-  const handleTransferFunnel = async (e, lead) => {
-    e.stopPropagation();
-
-    const isClientesInicio = activeFunnel === 'clientes-inicio';
-    const targetFunnel = isClientesInicio ? 'vendas' : 'clientes-inicio';
-    const targetLabel = isClientesInicio ? 'Funil de Vendas' : 'Pós-Venda (Clientes)';
-    const firstTargetList = isClientesInicio ? 'Novo Lead' : 'Boas-vindas';
-
-    setTransferringId(lead.id);
-
-    // Atualização otimista local
-    setLeads(prev => prev.map(l => 
-      l.id === lead.id ? { ...l, funil: targetFunnel, status: firstTargetList } : l
-    ));
-
-    try {
-      const res = await fetch('/backend/api/leads/status', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          whatsapp: lead.whatsapp,
-          status: firstTargetList,
-          origem: 'gigacrm',
-          funnelType: targetFunnel
-        })
-      });
-
-      if (res.ok) {
-        loadData(true);
-      }
-    } catch (err) {
-      console.error('Erro ao transferir lead de funil:', err);
-      loadData(true);
-    } finally {
-      setTransferringId(null);
-    }
-  };
-
-  // Enviar Mensagem de Texto Diretamente pelo CRM
+  // Envio de Mensagem de Texto no WhatsApp
   const handleSendChatMessage = async (e) => {
     if (e) e.preventDefault();
-    if (!chatInputText.trim() || !activeChatLead || isSendingMsg) return;
+    if (!chatInputText.trim() || !activeModalLead || isSendingMsg) return;
 
     const text = chatInputText.trim();
     setChatInputText('');
     setIsSendingMsg(true);
 
-    const cleanPhone = String(activeChatLead.whatsapp).replace(/\D/g, '');
+    const cleanPhone = String(activeModalLead.whatsapp).replace(/\D/g, '');
     const jid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
 
     const tempMsg = {
@@ -316,7 +552,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
       });
 
       if (res.ok) {
-        loadChatMessages(activeChatLead.whatsapp, true);
+        loadChatMessages(activeModalLead.whatsapp, true);
       }
     } catch (err) {
       console.error('Erro ao enviar mensagem:', err);
@@ -325,10 +561,10 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     }
   };
 
-  // Gravação e Envio de Áudio no Chat do Lead
+  // Gravação de Áudio
   const startAudioRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
-      alert('Seu navegador não suporta gravação de áudio.');
+      alert('Gravação de áudio não suportada no seu dispositivo.');
       return;
     }
 
@@ -356,7 +592,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
         setRecordingSeconds(prev => prev + 1);
       }, 1000);
     } catch (err) {
-      alert('Permissão de microfone negada ou erro ao iniciar gravação.');
+      alert('Permissão de microfone negada ou erro ao gravar.');
     }
   };
 
@@ -388,7 +624,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
       const reader = new FileReader();
       reader.onloadend = async () => {
         const audioBase64 = reader.result;
-        const cleanPhone = String(activeChatLead.whatsapp).replace(/\D/g, '');
+        const cleanPhone = String(activeModalLead.whatsapp).replace(/\D/g, '');
         const jid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
 
         try {
@@ -397,7 +633,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
             headers: getAuthHeaders(),
             body: JSON.stringify({ audio: audioBase64, origem: 'gigacrm' })
           });
-          loadChatMessages(activeChatLead.whatsapp, true);
+          loadChatMessages(activeModalLead.whatsapp, true);
         } catch (e) {
           console.error('Erro ao enviar áudio do WhatsApp:', e);
         }
@@ -411,17 +647,16 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     recorder.stop();
   };
 
-  // Agendamento de Mensagem Automática
+  // Agendamento de Mensagem
   const handleScheduleSubmit = async (e) => {
     e.preventDefault();
-    if (!scheduleText.trim() || !scheduleDate || !scheduleTime || !activeChatLead) return;
+    if (!scheduleText.trim() || !scheduleDate || !scheduleTime || !activeModalLead) return;
 
     setScheduleLoading(true);
     setScheduleMsgStatus('');
 
     const scheduledAt = `${scheduleDate}T${scheduleTime}:00`;
-    const rawPhone = activeChatLead.whatsapp || activeChatLead.phone;
-    const cleanPhone = String(rawPhone || '').split('@')[0].replace(/\D/g, '');
+    const cleanPhone = String(activeModalLead.whatsapp || '').split('@')[0].replace(/\D/g, '');
 
     try {
       const res = await fetch('/backend/api/schedule', {
@@ -431,9 +666,8 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
           phone: cleanPhone,
           text: scheduleText,
           scheduledAt: new Date(scheduledAt).toISOString(),
-          clientId: activeChatLead.id,
-          nome: activeChatLead.nome,
-          channel_id: activeChatLead.channel_id || null,
+          clientId: activeModalLead.id,
+          nome: activeModalLead.nome,
           origem: 'gigacrm'
         })
       });
@@ -463,9 +697,6 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  const currentList = lists.find(l => l.id === selectedListId) || lists[0] || DEFAULT_VENDAS_LISTS[0];
-  const currentLeads = getLeadsForList(currentList.id);
-
   return (
     <div style={{
       minHeight: '100vh',
@@ -474,20 +705,19 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
       display: 'flex',
       flexDirection: 'column',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-      paddingBottom: '80px',
       position: 'relative'
     }}>
-      {/* HEADER SUPERIOR */}
+      {/* HEADER FIXO DO TOPO */}
       <header style={{
-        padding: '14px 16px 10px',
+        padding: '12px 16px 10px',
         backgroundColor: '#0f172a',
         borderBottom: '1px solid rgba(255,255,255,0.08)',
         position: 'sticky',
         top: 0,
         zIndex: 100
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
               onClick={() => onNavigate('portal')}
               style={{
@@ -499,7 +729,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                 color: '#38bdf8',
                 padding: '6px 10px',
                 borderRadius: '8px',
-                fontSize: '0.82rem',
+                fontSize: '0.8rem',
                 fontWeight: '700',
                 cursor: 'pointer'
               }}
@@ -507,17 +737,18 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
               ← Portal
             </button>
             <div>
-              <h1 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: '#fff', letterSpacing: '-0.3px' }}>
-                Giga CRM {activeFunnel === 'clientes-inicio' ? '(Pós-Venda)' : '(Vendas)'}
+              <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', color: '#fff', letterSpacing: '-0.3px' }}>
+                Giga CRM <span style={{ color: '#ff6600', fontSize: '0.85rem' }}>• Kanban</span>
               </h1>
-              <p style={{ margin: 0, fontSize: '0.72rem', color: 'rgba(255,255,255,0.55)' }}>
-                Funil de contatos sincronizado com o banco
+              <p style={{ margin: 0, fontSize: '0.70rem', color: 'rgba(255,255,255,0.55)' }}>
+                {leads.length} contatos ativos no funil
               </p>
             </div>
           </div>
 
           <button
             onClick={() => loadData()}
+            disabled={loading}
             style={{
               background: 'rgba(56, 189, 248, 0.12)',
               border: '1px solid rgba(56, 189, 248, 0.25)',
@@ -525,66 +756,79 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
               padding: '6px 10px',
               borderRadius: '8px',
               fontSize: '0.78rem',
-              fontWeight: '600',
-              cursor: 'pointer'
+              fontWeight: '700',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
             }}
           >
-            🔄 {loading ? '...' : 'Atualizar'}
+            <span>🔄</span>
+            <span>{loading ? '...' : 'Atualizar'}</span>
           </button>
         </div>
 
-        {/* SEPARADOR DE FUNIL (ABAS VENDAS E PÓS-VENDA) */}
+        {/* SELETOR DE FUNIS DINÂMICOS (VENDAS, PÓS-VENDAS, CUSTOM) */}
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
+          display: 'flex',
+          alignItems: 'center',
           gap: '6px',
-          background: 'rgba(0,0,0,0.3)',
-          padding: '4px',
-          borderRadius: '10px',
-          marginBottom: '10px'
+          overflowX: 'auto',
+          paddingBottom: '4px',
+          marginBottom: '8px',
+          scrollbarWidth: 'none'
         }}>
-          <button
-            onClick={() => setActiveFunnel('vendas')}
-            style={{
-              padding: '7px 4px',
-              borderRadius: '7px',
-              border: 'none',
-              background: activeFunnel === 'vendas' ? '#ff6600' : 'transparent',
-              color: activeFunnel === 'vendas' ? '#fff' : 'rgba(255,255,255,0.7)',
-              fontWeight: '800',
-              fontSize: '0.8rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px'
-            }}
-          >
-            <span>🎯</span> Funil de Vendas
-          </button>
+          {availableFunnels.map((f) => {
+            const isActive = String(currentFunnelId).toUpperCase() === String(f.id).toUpperCase();
+            return (
+              <button
+                key={f.id}
+                onClick={() => setCurrentFunnelId(f.id)}
+                style={{
+                  flexShrink: 0,
+                  padding: '6px 12px',
+                  borderRadius: '999px',
+                  border: isActive ? '1.5px solid #ff6600' : '1px solid rgba(255,255,255,0.12)',
+                  background: isActive ? 'rgba(255, 102, 0, 0.2)' : 'rgba(255,255,255,0.04)',
+                  color: isActive ? '#fff' : 'rgba(255,255,255,0.7)',
+                  fontSize: '0.78rem',
+                  fontWeight: isActive ? '800' : '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <span>{f.id === 'POS_VENDAS' ? '🤝' : '🎯'}</span>
+                <span>{f.nome || f.id}</span>
+              </button>
+            );
+          })}
 
           <button
-            onClick={() => setActiveFunnel('clientes-inicio')}
+            onClick={() => setIsCreatingFunnel(true)}
             style={{
-              padding: '7px 4px',
-              borderRadius: '7px',
-              border: 'none',
-              background: activeFunnel === 'clientes-inicio' ? '#ff6600' : 'transparent',
-              color: activeFunnel === 'clientes-inicio' ? '#fff' : 'rgba(255,255,255,0.7)',
-              fontWeight: '800',
-              fontSize: '0.8rem',
+              flexShrink: 0,
+              padding: '6px 10px',
+              borderRadius: '999px',
+              border: '1px dashed rgba(255,255,255,0.25)',
+              background: 'transparent',
+              color: 'rgba(255,255,255,0.6)',
+              fontSize: '0.75rem',
+              fontWeight: '600',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px'
+              gap: '4px'
             }}
           >
-            <span>🤝</span> Pós-Venda (Clientes)
+            <span>+</span>
+            <span>Novo Funil</span>
           </button>
         </div>
 
-        {/* BUSCA NO FUNIL */}
+        {/* BUSCA NO QUADRO */}
         <div style={{ position: 'relative' }}>
           <input
             type="text"
@@ -593,7 +837,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{
               width: '100%',
-              padding: '9px 12px',
+              padding: '8px 12px',
               borderRadius: '10px',
               background: '#1e293b',
               border: '1px solid rgba(255,255,255,0.1)',
@@ -603,255 +847,446 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
               outline: 'none'
             }}
           />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              style={{
+                position: 'absolute',
+                right: '8px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                color: '#94a3b8',
+                fontSize: '0.9rem',
+                cursor: 'pointer',
+                padding: '4px'
+              }}
+            >
+              ✕
+            </button>
+          )}
         </div>
       </header>
 
-      {/* PÍLULAS DE LISTAS REAIS DO FUNIL ATIVO */}
-      <div style={{
-        display: 'flex',
+      {/* QUADRO KANBAN COM COLUNAS LADO A LADO E ROLAGEM HORIZONTAL LIVRE */}
+      <main style={{
+        flex: 1,
         overflowX: 'auto',
-        padding: '12px 16px 8px',
-        gap: '8px',
-        backgroundColor: '#0a1017',
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
-        scrollbarWidth: 'none'
+        overflowY: 'hidden',
+        display: 'flex',
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: '12px',
+        padding: '14px 14px 80px',
+        WebkitOverflowScrolling: 'touch',
+        minHeight: 'calc(100vh - 150px)'
       }}>
-        {lists.map((list) => {
-          const isSelected = selectedListId === list.id;
-          const count = getLeadsForList(list.id).length;
+        {stages.map((stage) => {
+          const stageLeads = getLeadsForStage(stage.id);
 
           return (
-            <button
-              key={list.id}
-              onClick={() => setSelectedListId(list.id)}
-              style={{
-                flexShrink: 0,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '8px 14px',
-                borderRadius: '999px',
-                border: isSelected ? `1.5px solid ${list.color}` : '1px solid rgba(255,255,255,0.1)',
-                background: isSelected ? `${list.color}22` : '#1e293b',
-                color: isSelected ? '#ffffff' : 'rgba(255,255,255,0.7)',
-                fontSize: '0.82rem',
-                fontWeight: isSelected ? '800' : '600',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: list.color }} />
-              <span>{list.name}</span>
-              <span style={{
-                fontSize: '0.72rem',
-                padding: '2px 7px',
-                borderRadius: '999px',
-                background: isSelected ? list.color : 'rgba(255,255,255,0.1)',
-                color: isSelected ? '#000' : '#fff',
-                fontWeight: '800'
-              }}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* LISTA DE CARDS DA LISTA ATIVA */}
-      <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: currentList.color }} />
-            <h2 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '800', color: '#fff' }}>
-              Lista: {currentList.name}
-            </h2>
-          </div>
-          <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)', fontWeight: '600' }}>
-            {currentLeads.length} contatos
-          </span>
-        </div>
-
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255,255,255,0.5)', fontSize: '0.9rem' }}>
-            Sincronizando lista do funil...
-          </div>
-        ) : currentLeads.length === 0 ? (
-          <div style={{
-            textAlign: 'center',
-            padding: '48px 20px',
-            color: 'rgba(255,255,255,0.5)',
-            background: 'rgba(255,255,255,0.02)',
-            borderRadius: '16px',
-            border: '1px dashed rgba(255,255,255,0.1)'
-          }}>
-            <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📭</div>
-            <div style={{ fontWeight: '700', color: '#fff', marginBottom: '4px' }}>Nenhum lead nesta lista</div>
-            <div style={{ fontSize: '0.78rem' }}>Mova leads de outras listas ou funis para cá.</div>
-          </div>
-        ) : (
-          currentLeads.map((lead) => (
             <div
-              key={lead.id}
-              onClick={() => setActiveChatLead(lead)}
+              key={stage.id}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => {
+                if (draggedLead) {
+                  handleMoveStage(draggedLead, stage.id);
+                  setDraggedLead(null);
+                }
+              }}
               style={{
-                backgroundColor: '#ffffff',
-                color: '#0f172a',
-                borderRadius: '12px',
-                padding: '14px 16px',
-                borderLeft: `5px solid ${currentList.color}`,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-                cursor: 'pointer',
+                width: '290px',
+                minWidth: '290px',
+                maxWidth: '290px',
+                backgroundColor: '#121c2a',
+                borderRadius: '14px',
+                border: '1px solid rgba(255,255,255,0.07)',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '6px',
-                position: 'relative'
+                maxHeight: 'calc(100vh - 170px)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                flexShrink: 0
               }}
             >
-              {/* TOPO DO CARD: NOME + FLECHINHA DE TRANSFERÊNCIA DE FUNIL */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                <div style={{ fontWeight: '800', fontSize: '0.95rem', color: '#0f172a', lineHeight: '1.3', flex: 1 }}>
-                  {lead.nome || lead.whatsapp || 'Lead Sem Nome'}
+              {/* CABEÇALHO DA COLUNA */}
+              <div style={{
+                padding: '12px 14px',
+                borderBottom: '1px solid rgba(255,255,255,0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: 'rgba(15, 23, 42, 0.7)',
+                borderRadius: '14px 14px 0 0'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <span style={{
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    backgroundColor: stage.color,
+                    flexShrink: 0
+                  }} />
+                  <span style={{
+                    fontWeight: '800',
+                    fontSize: '0.88rem',
+                    color: '#fff',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}>
+                    {stage.name}
+                  </span>
                 </div>
 
-                {/* FLECHINHA PARA ENVIAR PARA PÓS-VENDA OU VENDAS */}
-                <button
-                  onClick={(e) => handleTransferFunnel(e, lead)}
-                  disabled={transferringId === lead.id}
-                  title={activeFunnel === 'clientes-inicio' ? 'Enviar para Funil de Vendas' : 'Enviar para Pós-Venda (Clientes)'}
-                  style={{
-                    background: activeFunnel === 'clientes-inicio' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 102, 0, 0.15)',
-                    border: activeFunnel === 'clientes-inicio' ? '1px solid #38bdf8' : '1px solid #ff6600',
-                    color: activeFunnel === 'clientes-inicio' ? '#0284c7' : '#ea580c',
-                    borderRadius: '8px',
-                    padding: '4px 8px',
-                    fontSize: '0.78rem',
-                    fontWeight: '800',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <span>{activeFunnel === 'clientes-inicio' ? '← Vendas' : 'Pós-Venda ➔'}</span>
-                </button>
+                <span style={{
+                  fontSize: '0.72rem',
+                  fontWeight: '800',
+                  padding: '2px 8px',
+                  borderRadius: '999px',
+                  backgroundColor: `${stage.color}25`,
+                  color: stage.color,
+                  border: `1px solid ${stage.color}40`,
+                  flexShrink: 0
+                }}>
+                  {stageLeads.length}
+                </span>
               </div>
 
-              {lead.nome_loja && (
-                <div style={{ fontSize: '0.78rem', color: '#0284c7', fontWeight: '600' }}>
-                  🏬 {lead.nome_loja}
-                </div>
-              )}
-
-              {/* Destaque Visual do Copiloto Comercial CReMosa no Mobile */}
-              {(() => {
-                const desc = lead.description || lead.categoria || '';
-                const isCopiloto = desc.includes('💡 [Copiloto CReMosa]');
-                const returnDateMatch = desc.match(/(?:retorno|data prevista|agendado para|agendado|geladeira)[:\s]+([0-9]{2}\/[0-9]{2}(?:\/[0-9]{2,4})?|[0-9]{4}-[0-9]{2}-[0-9]{2})/i);
-                const returnDate = lead.data_retorno || (returnDateMatch ? returnDateMatch[1] : null);
-
-                let copilotoSnippet = null;
-                if (isCopiloto) {
-                  const afterTag = desc.substring(desc.indexOf('💡 [Copiloto CReMosa]') + 21).trim();
-                  copilotoSnippet = afterTag.split('\n\n')[0].replace(/^-\s*/, '').trim();
-                }
-
-                return (
-                  <>
-                    {copilotoSnippet && (
-                      <div style={{
-                        marginTop: '6px',
-                        marginBottom: '6px',
-                        padding: '6px 8px',
-                        background: 'rgba(234, 179, 8, 0.12)',
-                        border: '1px solid rgba(234, 179, 8, 0.35)',
-                        borderRadius: '8px',
-                        fontSize: '0.72rem',
-                        color: '#fef08a',
-                        lineHeight: '1.3'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '700', color: '#fbbf24', marginBottom: '2px' }}>
-                          <span>💡</span>
-                          <span>Copiloto CReMosa</span>
-                        </div>
-                        <div style={{ color: '#fef9c3', fontWeight: '500' }}>
-                          {copilotoSnippet}
-                        </div>
-                      </div>
-                    )}
-
-                    {returnDate && (
-                      <div style={{
-                        marginTop: '4px',
-                        marginBottom: '4px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        padding: '2px 6px',
-                        borderRadius: '6px',
-                        background: 'rgba(56, 189, 248, 0.15)',
-                        border: '1px solid rgba(56, 189, 248, 0.35)',
-                        color: '#7dd3fc',
-                        fontSize: '0.68rem',
-                        fontWeight: '700'
-                      }}>
-                        <span>❄️ Retorno: {returnDate}</span>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-
+              {/* LISTA VERTICAL DE CARDS DA COLUNA */}
               <div style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '10px',
                 display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginTop: '4px'
+                flexDirection: 'column',
+                gap: '10px'
               }}>
-                <div style={{ fontSize: '0.82rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' }}>
-                  <span>📞</span>
-                  <span>{lead.whatsapp}</span>
-                </div>
+                {stageLeads.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '30px 10px',
+                    color: 'rgba(255,255,255,0.35)',
+                    fontSize: '0.78rem',
+                    borderRadius: '10px',
+                    border: '1px dashed rgba(255,255,255,0.08)',
+                    background: 'rgba(0,0,0,0.1)'
+                  }}>
+                    Nenhum lead nesta etapa
+                  </div>
+                ) : (
+                  stageLeads.map((lead) => {
+                    const desc = lead.description || lead.categoria || '';
+                    const isCopiloto = desc.includes('💡 [Copiloto CReMosa]');
+                    const returnDateMatch = desc.match(/(?:retorno|data prevista|agendado para|agendado|geladeira)[:\s]+([0-9]{2}\/[0-9]{2}(?:\/[0-9]{2,4})?|[0-9]{4}-[0-9]{2}-[0-9]{2})/i);
+                    const returnDate = lead.data_retorno || (returnDateMatch ? returnDateMatch[1] : null);
 
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    backgroundColor: '#0284c7',
-                    color: '#fff',
-                    padding: '4px 10px',
-                    borderRadius: '6px',
-                    fontSize: '0.72rem',
-                    fontWeight: '700'
-                  }}
-                >
-                  <span>💬</span> Abrir Chat
-                </div>
+                    let copilotoSnippet = null;
+                    if (isCopiloto) {
+                      const afterTag = desc.substring(desc.indexOf('💡 [Copiloto CReMosa]') + 21).trim();
+                      copilotoSnippet = afterTag.split('\n\n')[0].replace(/^-\s*/, '').trim();
+                    }
+
+                    return (
+                      <div
+                        key={lead.id}
+                        draggable
+                        onDragStart={() => setDraggedLead(lead)}
+                        onClick={() => openLeadModal(lead)}
+                        style={{
+                          backgroundColor: '#ffffff',
+                          color: '#0f172a',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          borderLeft: `4px solid ${stage.color}`,
+                          boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          position: 'relative',
+                          transition: 'transform 0.1s ease'
+                        }}
+                      >
+                        {/* CABEÇALHO DO CARD: NOME E BOTÕES DE AÇÃO RÁPIDA */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                          <div style={{
+                            fontWeight: '800',
+                            fontSize: '0.90rem',
+                            color: '#0f172a',
+                            lineHeight: '1.25',
+                            flex: 1
+                          }}>
+                            {lead.nome_loja ? `${lead.nome || 'Lead'} • ${lead.nome_loja}` : (lead.nome || lead.whatsapp || 'Lead')}
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                            {/* Botão Transferir Funil */}
+                            <button
+                              onClick={(e) => handleTransferFunnel(e, lead)}
+                              disabled={transferringId === lead.id}
+                              title={currentFunnelId === 'POS_VENDAS' ? 'Enviar para Funil de Vendas' : 'Enviar para Pós-Vendas'}
+                              style={{
+                                background: currentFunnelId === 'POS_VENDAS' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 102, 0, 0.15)',
+                                border: 'none',
+                                color: currentFunnelId === 'POS_VENDAS' ? '#0284c7' : '#ea580c',
+                                borderRadius: '6px',
+                                padding: '3px 6px',
+                                fontSize: '0.70rem',
+                                fontWeight: '800',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {currentFunnelId === 'POS_VENDAS' ? '← Vendas' : 'Pós ➔'}
+                            </button>
+
+                            {/* Botão Arquivar (X) */}
+                            <button
+                              onClick={(e) => handleArchiveCard(e, lead)}
+                              title="Arquivar lead"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#94a3b8',
+                                fontSize: '0.85rem',
+                                padding: '2px 4px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* TELEFONE FORMATADO */}
+                        <div style={{ fontSize: '0.78rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span>📞</span>
+                          <span>{lead.whatsapp}</span>
+                        </div>
+
+                        {/* DESTAQUE VISUAL COPILOTO CREMOSA */}
+                        {copilotoSnippet && (
+                          <div style={{
+                            padding: '5px 7px',
+                            background: 'rgba(234, 179, 8, 0.12)',
+                            border: '1px solid rgba(234, 179, 8, 0.3)',
+                            borderRadius: '6px',
+                            fontSize: '0.70rem',
+                            color: '#854d0e',
+                            lineHeight: '1.25'
+                          }}>
+                            <div style={{ fontWeight: '700', color: '#b45309', marginBottom: '2px' }}>
+                              💡 Copiloto CReMosa
+                            </div>
+                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                              {copilotoSnippet}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* RETORNO / AGENDAMENTO */}
+                        {returnDate && (
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: 'rgba(2, 132, 199, 0.1)',
+                            color: '#0369a1',
+                            fontSize: '0.68rem',
+                            fontWeight: '700',
+                            alignSelf: 'flex-start'
+                          }}>
+                            <span>❄️ Retorno:</span>
+                            <span>{returnDate}</span>
+                          </div>
+                        )}
+
+                        {/* BARRA INFERIOR DE AÇÃO DO CARD */}
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginTop: '4px',
+                          paddingTop: '6px',
+                          borderTop: '1px solid #f1f5f9'
+                        }}>
+                          {/* Botão Rápido para Mover Etapa */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQuickMoveLead(lead);
+                            }}
+                            style={{
+                              background: '#f1f5f9',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '6px',
+                              padding: '4px 8px',
+                              fontSize: '0.70rem',
+                              fontWeight: '700',
+                              color: '#475569',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <span>⇄ Mover</span>
+                          </button>
+
+                          {/* Abrir Chat / Detalhes */}
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            backgroundColor: '#0284c7',
+                            color: '#fff',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.70rem',
+                            fontWeight: '700'
+                          }}>
+                            <span>💬 Chat</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
-          ))
-        )}
-      </div>
+          );
+        })}
 
-      {/* CENTRAL DE CONVERSAS INTEGRADA DO LEAD */}
-      {activeChatLead && (
+        {/* BOTÃO PARA ADICIONAR NOVA COLUNA NO FINAL DO QUADRO */}
+        <div style={{
+          width: '260px',
+          minWidth: '260px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px',
+          border: '1px dashed rgba(255,255,255,0.15)',
+          borderRadius: '14px',
+          backgroundColor: 'rgba(255,255,255,0.02)',
+          cursor: 'pointer',
+          flexShrink: 0
+        }}
+        onClick={() => setIsCreatingStage(true)}
+        >
+          <span style={{ fontSize: '1.5rem', marginBottom: '6px', color: '#ff6600' }}>+</span>
+          <span style={{ fontWeight: '700', fontSize: '0.85rem', color: 'rgba(255,255,255,0.8)' }}>
+            Adicionar Nova Lista
+          </span>
+          <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)', marginTop: '4px' }}>
+            Nova coluna neste funil
+          </span>
+        </div>
+      </main>
+
+      {/* MODAL DE MOVER ETAPA (POPOVER RÁPIDO AO TOCAR EM '⇄ Mover') */}
+      {quickMoveLead && (
         <div
+          onClick={() => setQuickMoveLead(null)}
           style={{
             position: 'fixed',
             top: 0,
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: '#0b141a',
-            zIndex: 1000,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            zIndex: 1500,
             display: 'flex',
-            flexDirection: 'column'
+            alignItems: 'flex-end',
+            justifyContent: 'center'
           }}
         >
-          {/* HEADER DO CHAT DO LEAD */}
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              backgroundColor: '#161f2e',
+              width: '100%',
+              maxWidth: '480px',
+              borderRadius: '20px 20px 0 0',
+              padding: '20px 18px 30px',
+              boxShadow: '0 -4px 20px rgba(0,0,0,0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '800', color: '#fff' }}>
+                  Mover de Etapa
+                </h3>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: '#94a3b8' }}>
+                  {quickMoveLead.nome || quickMoveLead.whatsapp}
+                </p>
+              </div>
+              <button
+                onClick={() => setQuickMoveLead(null)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.2rem', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '50vh', overflowY: 'auto' }}>
+              {stages.map((stg) => {
+                const currentLista = quickMoveLead.lista || quickMoveLead.status || stages[0]?.id;
+                const isCurrent = String(currentLista).toLowerCase() === String(stg.id).toLowerCase();
+
+                return (
+                  <button
+                    key={stg.id}
+                    onClick={() => handleMoveStage(quickMoveLead, stg.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 14px',
+                      borderRadius: '10px',
+                      background: isCurrent ? `${stg.color}30` : 'rgba(255,255,255,0.05)',
+                      border: isCurrent ? `1.5px solid ${stg.color}` : '1px solid rgba(255,255,255,0.08)',
+                      color: isCurrent ? '#fff' : 'rgba(255,255,255,0.85)',
+                      fontWeight: isCurrent ? '800' : '600',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: stg.color }} />
+                      <span>{stg.name}</span>
+                    </div>
+                    {isCurrent && <span style={{ color: stg.color, fontSize: '0.75rem' }}>● Atual</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL COMPLETO DE DETALHES DO LEAD (ABAS: CHAT E DADOS) */}
+      {activeModalLead && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: '#0b141a',
+          zIndex: 1000,
+          display: 'flex',
+          flexDirection: 'column'
+        }}>
+          {/* HEADER DO MODAL */}
           <div style={{
             padding: '10px 14px',
-            backgroundColor: '#202c33',
+            backgroundColor: '#1f2c34',
             borderBottom: '1px solid rgba(255,255,255,0.08)',
             display: 'flex',
             alignItems: 'center',
@@ -860,7 +1295,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
               <button
-                onClick={() => setActiveChatLead(null)}
+                onClick={() => setActiveModalLead(null)}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -869,7 +1304,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                   cursor: 'pointer',
                   padding: '4px'
                 }}
-                title="Voltar ao Funil"
+                title="Voltar ao Quadro"
               >
                 ←
               </button>
@@ -877,359 +1312,693 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
               <div style={{ minWidth: 0 }}>
                 <div style={{
                   fontWeight: '800',
-                  fontSize: '0.98rem',
+                  fontSize: '0.95rem',
                   color: '#fff',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis'
                 }}>
-                  {activeChatLead.nome || activeChatLead.whatsapp}
+                  {activeModalLead.nome || activeModalLead.whatsapp}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#8696a0' }}>
-                  {activeChatLead.whatsapp} {activeChatLead.nome_loja ? `• ${activeChatLead.nome_loja}` : ''}
+                <div style={{ fontSize: '0.72rem', color: '#8696a0' }}>
+                  {activeModalLead.whatsapp} {activeModalLead.nome_loja ? `• ${activeModalLead.nome_loja}` : ''}
                 </div>
               </div>
             </div>
 
-            {/* SELETOR RÁPIDO DE LISTA NO TOPO DO CHAT */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <select
-                value={activeChatLead.status || lists[0]?.id}
-                onChange={(e) => handleMoveList(activeChatLead.id, e.target.value)}
-                style={{
-                  background: '#111b21',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  color: '#38bdf8',
-                  padding: '6px 8px',
-                  borderRadius: '8px',
-                  fontSize: '0.72rem',
-                  fontWeight: '700'
-                }}
-              >
-                {lists.map(l => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
-              </select>
-
-              <button
-                onClick={() => setIsScheduleOpen(true)}
-                style={{
-                  background: 'rgba(255, 102, 0, 0.15)',
-                  border: '1px solid rgba(255, 102, 0, 0.3)',
-                  color: '#ff8800',
-                  borderRadius: '8px',
-                  padding: '6px 8px',
-                  fontSize: '0.75rem',
-                  fontWeight: '700',
-                  cursor: 'pointer'
-                }}
-                title="Agendar Mensagem"
-              >
-                📅 Agendar
-              </button>
-            </div>
+            {/* SELETOR DE ETAPA NO HEADER DO MODAL */}
+            <select
+              value={activeModalLead.lista || activeModalLead.status || stages[0]?.id}
+              onChange={(e) => handleMoveStage(activeModalLead, e.target.value)}
+              style={{
+                background: '#111b21',
+                border: '1px solid rgba(255,255,255,0.2)',
+                color: '#38bdf8',
+                padding: '6px 8px',
+                borderRadius: '8px',
+                fontSize: '0.72rem',
+                fontWeight: '700',
+                maxWidth: '120px'
+              }}
+            >
+              {stages.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
           </div>
 
-          {/* LISTA DE MENSAGENS REAIS DO WHATSAPP */}
+          {/* ABAS DO MODAL: [💬 WhatsApp] e [📋 Dados do Lead] */}
           <div style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '16px 12px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.02) 1px, transparent 1px)',
-            backgroundSize: '16px 16px'
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            backgroundColor: '#16222a',
+            borderBottom: '1px solid rgba(255,255,255,0.08)'
           }}>
-            {chatLoading ? (
-              <div style={{ textAlign: 'center', color: '#8696a0', padding: '40px 0', fontSize: '0.88rem' }}>
-                Carregando histórico do WhatsApp...
-              </div>
-            ) : chatMessages.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#8696a0', padding: '40px 20px', fontSize: '0.85rem' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>💬</div>
-                <div>Nenhuma mensagem no histórico.</div>
-                <div style={{ fontSize: '0.78rem', marginTop: '4px' }}>Envie uma mensagem abaixo para iniciar o atendimento.</div>
-              </div>
-            ) : (
-              chatMessages.map((msg, idx) => {
-                const isMe = Boolean(msg.fromMe || msg.sender === 'user' || msg.sender === 'me');
+            <button
+              onClick={() => setModalTab('chat')}
+              style={{
+                padding: '10px',
+                border: 'none',
+                borderBottom: modalTab === 'chat' ? '2.5px solid #00a884' : '2.5px solid transparent',
+                background: 'transparent',
+                color: modalTab === 'chat' ? '#00a884' : '#8696a0',
+                fontWeight: '700',
+                fontSize: '0.85rem',
+                cursor: 'pointer'
+              }}
+            >
+              💬 WhatsApp
+            </button>
 
-                return (
-                  <div
-                    key={msg.id || idx}
+            <button
+              onClick={() => setModalTab('details')}
+              style={{
+                padding: '10px',
+                border: 'none',
+                borderBottom: modalTab === 'details' ? '2.5px solid #38bdf8' : '2.5px solid transparent',
+                background: 'transparent',
+                color: modalTab === 'details' ? '#38bdf8' : '#8696a0',
+                fontWeight: '700',
+                fontSize: '0.85rem',
+                cursor: 'pointer'
+              }}
+            >
+              📋 Dados do Lead
+            </button>
+          </div>
+
+          {/* CONTEÚDO DA ABA 1: CHAT INTEGRADO WHATSAPP */}
+          {modalTab === 'chat' && (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '14px 12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.02) 1px, transparent 1px)',
+                backgroundSize: '16px 16px'
+              }}>
+                {chatLoading ? (
+                  <div style={{ textAlign: 'center', color: '#8696a0', padding: '40px 0', fontSize: '0.85rem' }}>
+                    Sincronizando histórico do WhatsApp...
+                  </div>
+                ) : chatMessages.length === 0 ? (
+                  <div style={{ textAlign: 'center', color: '#8696a0', padding: '40px 20px', fontSize: '0.82rem' }}>
+                    <div style={{ fontSize: '2.2rem', marginBottom: '8px' }}>💬</div>
+                    <div>Nenhuma mensagem no histórico.</div>
+                    <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>Envie uma mensagem abaixo para falar com o lead.</div>
+                  </div>
+                ) : (
+                  chatMessages.map((msg, idx) => {
+                    const isMe = Boolean(msg.fromMe || msg.sender === 'user' || msg.sender === 'me');
+
+                    return (
+                      <div
+                        key={msg.id || idx}
+                        style={{
+                          display: 'flex',
+                          justifyContent: isMe ? 'flex-end' : 'flex-start'
+                        }}
+                      >
+                        <div style={{
+                          maxWidth: '82%',
+                          padding: '8px 12px',
+                          borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                          backgroundColor: isMe ? '#005c4b' : '#202c33',
+                          color: '#e9edef',
+                          fontSize: '0.85rem',
+                          lineHeight: '1.35',
+                          wordBreak: 'break-word',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                        }}>
+                          {msg.mediaUrl || msg.audioUrl ? (
+                            <div>
+                              <div style={{ fontSize: '0.70rem', color: 'rgba(255,255,255,0.7)', marginBottom: '4px' }}>🎙️ Áudio</div>
+                              <audio controls src={msg.mediaUrl || msg.audioUrl} style={{ width: '100%', height: '34px' }} />
+                            </div>
+                          ) : (
+                            <div>{msg.text || msg.body || msg.content}</div>
+                          )}
+
+                          <div style={{
+                            fontSize: '0.62rem',
+                            color: isMe ? '#86efac' : '#8696a0',
+                            textAlign: 'right',
+                            marginTop: '3px'
+                          }}>
+                            {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                            {isMe && ' ✓✓'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* BARRA DE DIGITAÇÃO / GRAVAÇÃO DE ÁUDIO */}
+              {isRecordingAudio ? (
+                <div style={{
+                  padding: '10px 14px',
+                  backgroundColor: '#202c33',
+                  borderTop: '1px solid rgba(255,255,255,0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontWeight: '700', fontSize: '0.85rem' }}>
+                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#ef4444' }} />
+                    <span>Gravando: {formatTimer(recordingSeconds)}</span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={cancelAudioRecording}
+                      style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: '8px', fontSize: '0.8rem', cursor: 'pointer' }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={finishAndSendAudio}
+                      style={{ background: '#00a884', border: 'none', color: '#fff', padding: '8px 14px', borderRadius: '8px', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}
+                    >
+                      Enviar ➔
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form
+                  onSubmit={handleSendChatMessage}
+                  style={{
+                    padding: '8px 10px',
+                    backgroundColor: '#202c33',
+                    borderTop: '1px solid rgba(255,255,255,0.08)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setIsScheduleOpen(true)}
                     style={{
+                      background: 'none',
+                      border: 'none',
+                      fontSize: '1.2rem',
+                      cursor: 'pointer',
+                      padding: '4px'
+                    }}
+                    title="Agendar Mensagem"
+                  >
+                    📅
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={startAudioRecording}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      fontSize: '1.2rem',
+                      cursor: 'pointer',
+                      padding: '4px'
+                    }}
+                    title="Gravar Áudio"
+                  >
+                    🎙️
+                  </button>
+
+                  <input
+                    type="text"
+                    placeholder="Mensagem para o cliente..."
+                    value={chatInputText}
+                    onChange={(e) => setChatInputText(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '9px 12px',
+                      borderRadius: '20px',
+                      background: '#2a3942',
+                      border: 'none',
+                      color: '#e9edef',
+                      fontSize: '0.85rem',
+                      outline: 'none'
+                    }}
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={!chatInputText.trim() || isSendingMsg}
+                    style={{
+                      background: chatInputText.trim() ? '#00a884' : 'transparent',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: '38px',
+                      height: '38px',
                       display: 'flex',
-                      justifyContent: isMe ? 'flex-end' : 'flex-start'
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: chatInputText.trim() ? '#fff' : '#8696a0',
+                      fontSize: '1rem',
+                      cursor: chatInputText.trim() ? 'pointer' : 'default'
                     }}
                   >
-                    <div style={{
-                      maxWidth: '82%',
-                      padding: '8px 12px',
-                      borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                      backgroundColor: isMe ? '#005c4b' : '#202c33',
-                      color: '#e9edef',
-                      fontSize: '0.88rem',
-                      lineHeight: '1.4',
-                      wordBreak: 'break-word',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                    }}>
-                      {msg.mediaUrl || msg.audioUrl ? (
-                        <div>
-                          <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.7)', marginBottom: '4px' }}>🎙️ Mensagem de Áudio</div>
-                          <audio controls src={msg.mediaUrl || msg.audioUrl} style={{ width: '100%', height: '36px' }} />
-                        </div>
-                      ) : (
-                        <div>{msg.text || msg.body || msg.content}</div>
-                      )}
+                    ➔
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
 
-                      <div style={{
-                        fontSize: '0.65rem',
-                        color: isMe ? '#86efac' : '#8696a0',
-                        textAlign: 'right',
-                        marginTop: '3px'
-                      }}>
-                        {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                        {isMe && ' ✓✓'}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-            <div ref={chatEndRef} />
-          </div>
+          {/* CONTEÚDO DA ABA 2: DADOS DO LEAD (EDIÇÃO COMPLETA) */}
+          {modalTab === 'details' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+              <form onSubmit={handleSaveLeadDetails} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                    Nome do Contato:
+                  </label>
+                  <input
+                    type="text"
+                    value={editedLeadData.nome || ''}
+                    onChange={e => setEditedLeadData(prev => ({ ...prev, nome: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      background: '#161f2e',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      color: '#fff',
+                      fontSize: '0.85rem',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
 
-          {/* BARRA DE DIGITAÇÃO / GRAVAÇÃO DE ÁUDIO */}
-          {isRecordingAudio ? (
-            <div style={{
-              padding: '10px 14px',
-              backgroundColor: '#202c33',
-              borderTop: '1px solid rgba(255,255,255,0.08)',
+                <div>
+                  <label style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                    Nome da Loja / Empresa:
+                  </label>
+                  <input
+                    type="text"
+                    value={editedLeadData.nome_loja || ''}
+                    onChange={e => setEditedLeadData(prev => ({ ...prev, nome_loja: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      background: '#161f2e',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      color: '#fff',
+                      fontSize: '0.85rem',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                    WhatsApp:
+                  </label>
+                  <input
+                    type="text"
+                    value={editedLeadData.whatsapp || ''}
+                    onChange={e => setEditedLeadData(prev => ({ ...prev, whatsapp: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      background: '#161f2e',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      color: '#fff',
+                      fontSize: '0.85rem',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                    E-mail:
+                  </label>
+                  <input
+                    type="email"
+                    value={editedLeadData.email || ''}
+                    onChange={e => setEditedLeadData(prev => ({ ...prev, email: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      background: '#161f2e',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      color: '#fff',
+                      fontSize: '0.85rem',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                    Cidade / Região:
+                  </label>
+                  <input
+                    type="text"
+                    value={editedLeadData.cidade || ''}
+                    onChange={e => setEditedLeadData(prev => ({ ...prev, cidade: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      background: '#161f2e',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      color: '#fff',
+                      fontSize: '0.85rem',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
+                    Observações / Anotações / Copiloto:
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={editedLeadData.description || editedLeadData.categoria || ''}
+                    onChange={e => setEditedLeadData(prev => ({
+                      ...prev,
+                      description: e.target.value,
+                      categoria: e.target.value
+                    }))}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      background: '#161f2e',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      color: '#fff',
+                      fontSize: '0.85rem',
+                      boxSizing: 'border-box',
+                      resize: 'vertical'
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSavingLead}
+                  style={{
+                    marginTop: '8px',
+                    padding: '12px',
+                    borderRadius: '10px',
+                    background: '#0284c7',
+                    border: 'none',
+                    color: '#fff',
+                    fontWeight: '800',
+                    fontSize: '0.9rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {isSavingLead ? 'Salvando...' : '💾 Salvar Alterações'}
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODAL DE AGENDAMENTO DE MENSAGEM */}
+      {isScheduleOpen && (
+        <div
+          onClick={() => setIsScheduleOpen(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.8)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            boxSizing: 'border-box'
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#161b22',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '16px',
+              padding: '20px',
+              width: '100%',
+              maxWidth: '380px',
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '10px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontWeight: '700', fontSize: '0.85rem' }}>
-                <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#ef4444', animation: 'pulse 1s infinite' }} />
-                <span>Gravando: {formatTimer(recordingSeconds)}</span>
+              flexDirection: 'column',
+              gap: '12px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', color: '#ff8800' }}>
+                📅 Agendar Mensagem
+              </h3>
+              <button
+                onClick={() => setIsScheduleOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleScheduleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div>
+                <label style={{ fontSize: '0.78rem', color: '#8696a0', display: 'block', marginBottom: '4px' }}>Data do Disparo:</label>
+                <input
+                  type="date"
+                  value={scheduleDate}
+                  onChange={e => setScheduleDate(e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    background: '#0d1117',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#fff',
+                    boxSizing: 'border-box'
+                  }}
+                />
               </div>
 
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div>
+                <label style={{ fontSize: '0.78rem', color: '#8696a0', display: 'block', marginBottom: '4px' }}>Horário:</label>
+                <input
+                  type="time"
+                  value={scheduleTime}
+                  onChange={e => setScheduleTime(e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    background: '#0d1117',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#fff',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.78rem', color: '#8696a0', display: 'block', marginBottom: '4px' }}>Mensagem Automática:</label>
+                <textarea
+                  rows={3}
+                  placeholder="Olá! Conforme combinamos, estou entrando em contato..."
+                  value={scheduleText}
+                  onChange={e => setScheduleText(e.target.value)}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    background: '#0d1117',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    resize: 'none'
+                  }}
+                />
+              </div>
+
+              {scheduleMsgStatus && (
+                <div style={{ fontSize: '0.82rem', textAlign: 'center', color: scheduleMsgStatus.includes('✅') ? '#4ade80' : '#f87171' }}>
+                  {scheduleMsgStatus}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={scheduleLoading}
+                style={{
+                  marginTop: '6px',
+                  padding: '12px',
+                  background: '#ff6600',
+                  border: 'none',
+                  borderRadius: '10px',
+                  color: '#fff',
+                  fontWeight: '700',
+                  fontSize: '0.9rem',
+                  cursor: 'pointer'
+                }}
+              >
+                {scheduleLoading ? 'Agendando...' : 'Confirmar Agendamento'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CRIAR NOVO FUNIL */}
+      {isCreatingFunnel && (
+        <div
+          onClick={() => setIsCreatingFunnel(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.8)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#161f2e',
+              borderRadius: '16px',
+              padding: '20px',
+              width: '100%',
+              maxWidth: '360px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: '1rem', color: '#fff' }}>+ Criar Novo Funil</h3>
+            <form onSubmit={handleCreateFunnelSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <input
+                type="text"
+                placeholder="Nome do novo funil..."
+                value={newFunnelName}
+                onChange={e => setNewFunnelName(e.target.value)}
+                autoFocus
+                required
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  background: '#0d1117',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#fff',
+                  fontSize: '0.85rem'
+                }}
+              />
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                 <button
-                  onClick={cancelAudioRecording}
-                  style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: '8px', fontSize: '0.8rem', cursor: 'pointer' }}
+                  type="button"
+                  onClick={() => setIsCreatingFunnel(false)}
+                  style={{ padding: '8px 12px', borderRadius: '8px', background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
                 >
                   Cancelar
                 </button>
                 <button
-                  onClick={finishAndSendAudio}
-                  style={{ background: '#00a884', border: 'none', color: '#fff', padding: '8px 14px', borderRadius: '8px', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}
+                  type="submit"
+                  style={{ padding: '8px 16px', borderRadius: '8px', background: '#ff6600', border: 'none', color: '#fff', fontWeight: '700', cursor: 'pointer' }}
                 >
-                  Enviar Áudio ➔
+                  Criar
                 </button>
               </div>
-            </div>
-          ) : (
-            <form
-              onSubmit={handleSendChatMessage}
-              style={{
-                padding: '10px 12px',
-                backgroundColor: '#202c33',
-                borderTop: '1px solid rgba(255,255,255,0.08)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <button
-                type="button"
-                onClick={startAudioRecording}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#8696a0',
-                  fontSize: '1.3rem',
-                  cursor: 'pointer',
-                  padding: '6px'
-                }}
-                title="Gravar Áudio"
-              >
-                🎙️
-              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
+      {/* MODAL CRIAR NOVA COLUNA / LISTA */}
+      {isCreatingStage && (
+        <div
+          onClick={() => setIsCreatingStage(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.8)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#161f2e',
+              borderRadius: '16px',
+              padding: '20px',
+              width: '100%',
+              maxWidth: '360px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: '1rem', color: '#fff' }}>+ Nova Coluna no Funil</h3>
+            <form onSubmit={handleCreateStageSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <input
                 type="text"
-                placeholder="Mensagem para o cliente..."
-                value={chatInputText}
-                onChange={(e) => setChatInputText(e.target.value)}
+                placeholder="Ex: Em Negociação, Aguardando..."
+                value={newStageName}
+                onChange={e => setNewStageName(e.target.value)}
+                autoFocus
+                required
                 style={{
-                  flex: 1,
-                  padding: '10px 14px',
-                  borderRadius: '20px',
-                  background: '#2a3942',
-                  border: 'none',
-                  color: '#e9edef',
-                  fontSize: '0.88rem',
-                  outline: 'none'
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  background: '#0d1117',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#fff',
+                  fontSize: '0.85rem'
                 }}
               />
-
-              <button
-                type="submit"
-                disabled={!chatInputText.trim() || isSendingMsg}
-                style={{
-                  background: chatInputText.trim() ? '#00a884' : 'transparent',
-                  border: 'none',
-                  borderRadius: '50%',
-                  width: '40px',
-                  height: '40px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: chatInputText.trim() ? '#fff' : '#8696a0',
-                  fontSize: '1.1rem',
-                  cursor: chatInputText.trim() ? 'pointer' : 'default'
-                }}
-              >
-                ➔
-              </button>
-            </form>
-          )}
-
-          {/* MODAL DE AGENDAMENTO DE MENSAGEM */}
-          {isScheduleOpen && (
-            <div
-              onClick={() => setIsScheduleOpen(false)}
-              style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: 'rgba(0,0,0,0.8)',
-                zIndex: 2000,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '20px',
-                boxSizing: 'border-box'
-              }}
-            >
-              <div
-                onClick={e => e.stopPropagation()}
-                style={{
-                  background: '#161b22',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  borderRadius: '16px',
-                  padding: '20px',
-                  width: '100%',
-                  maxWidth: '380px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', color: '#ff8800' }}>
-                    📅 Agendar Mensagem
-                  </h3>
-                  <button
-                    onClick={() => setIsScheduleOpen(false)}
-                    style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.2rem', cursor: 'pointer' }}
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <form onSubmit={handleScheduleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '0.78rem', color: '#8696a0', display: 'block', marginBottom: '4px' }}>Data do Disparo:</label>
-                    <input
-                      type="date"
-                      value={scheduleDate}
-                      onChange={e => setScheduleDate(e.target.value)}
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '8px 10px',
-                        borderRadius: '8px',
-                        background: '#0d1117',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        color: '#fff',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.78rem', color: '#8696a0', display: 'block', marginBottom: '4px' }}>Horário:</label>
-                    <input
-                      type="time"
-                      value={scheduleTime}
-                      onChange={e => setScheduleTime(e.target.value)}
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '8px 10px',
-                        borderRadius: '8px',
-                        background: '#0d1117',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        color: '#fff',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.78rem', color: '#8696a0', display: 'block', marginBottom: '4px' }}>Mensagem Automática:</label>
-                    <textarea
-                      rows={3}
-                      placeholder="Olá! Conforme combinamos, estou entrando em contato..."
-                      value={scheduleText}
-                      onChange={e => setScheduleText(e.target.value)}
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '8px 10px',
-                        borderRadius: '8px',
-                        background: '#0d1117',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        color: '#fff',
-                        boxSizing: 'border-box',
-                        resize: 'none'
-                      }}
-                    />
-                  </div>
-
-                  {scheduleMsgStatus && (
-                    <div style={{ fontSize: '0.82rem', textAlign: 'center', color: scheduleMsgStatus.includes('✅') ? '#4ade80' : '#f87171' }}>
-                      {scheduleMsgStatus}
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={scheduleLoading}
-                    style={{
-                      marginTop: '6px',
-                      padding: '12px',
-                      background: '#ff6600',
-                      border: 'none',
-                      borderRadius: '10px',
-                      color: '#fff',
-                      fontWeight: '700',
-                      fontSize: '0.9rem',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {scheduleLoading ? 'Agendando...' : 'Confirmar Agendamento'}
-                  </button>
-                </form>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingStage(false)}
+                  style={{ padding: '8px 12px', borderRadius: '8px', background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  style={{ padding: '8px 16px', borderRadius: '8px', background: '#0284c7', border: 'none', color: '#fff', fontWeight: '700', cursor: 'pointer' }}
+                >
+                  Criar Coluna
+                </button>
               </div>
-            </div>
-          )}
+            </form>
+          </div>
         </div>
       )}
 
@@ -1243,13 +2012,13 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
           background: 'linear-gradient(135deg, #f59e0b, #d97706)',
           border: 'none',
           color: '#fff',
-          padding: '12px 18px',
+          padding: '10px 16px',
           borderRadius: '999px',
           fontWeight: '800',
-          fontSize: '0.88rem',
+          fontSize: '0.82rem',
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
+          gap: '6px',
           boxShadow: '0 6px 20px rgba(245, 158, 11, 0.45)',
           cursor: 'pointer',
           zIndex: 900

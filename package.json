@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:apk": "npm run build && npx cap sync android && powershell -ExecutionPolicy Bypass -File .\\build-apk.ps1",
     "preview": "vite preview",
     "cap:install": "npm install @capacitor/core @capacitor/cli @capacitor/android",
     "cap:init": "npx cap init \"GigaHub\" \"site.gigahub.app\" --web-dir dist",
