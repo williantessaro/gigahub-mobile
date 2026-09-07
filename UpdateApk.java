@@ -63,6 +63,18 @@ public class UpdateApk {
                 }
             });
 
+            // 3.5 Garantir cordova.js e cordova_plugins.js
+            Path cordovaJs = assetsPublic.resolve("cordova.js");
+            if (!Files.exists(cordovaJs)) {
+                Files.createFile(cordovaJs);
+                System.out.println("Criado cordova.js vazio para compatibilidade Capacitor");
+            }
+            Path cordovaPluginsJs = assetsPublic.resolve("cordova_plugins.js");
+            if (!Files.exists(cordovaPluginsJs)) {
+                Files.createFile(cordovaPluginsJs);
+                System.out.println("Criado cordova_plugins.js vazio para compatibilidade Capacitor");
+            }
+
             // 4. Copiar capacitor.config.json para /assets/capacitor.config.json
             File capConfig = new File(newAssetsDir.getParentFile(), "capacitor.config.json");
             if (capConfig.exists()) {

@@ -40,3 +40,9 @@ android/*.iml
 android/local.properties
 android_sdk/
 android/app/src/main/assets/public/
+*.idsig
+release/*-working.apk
+release/*-new.apk
+test-browser.cjs
+release/old-bundle.js
+uber-apk-signer.jar

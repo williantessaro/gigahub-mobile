@@ -26,27 +26,28 @@ if (-not (Test-Path $javaExe)) {
 
 & $javaExe UpdateApk.java $OutputApk $DistDir
 
-# 3. Assinar com jarsigner
-Write-Host "3. Assinando APK com jarsigner..." -ForegroundColor Yellow
-$jarsigner = "$env:JAVA_HOME\bin\jarsigner.exe"
-if (-not (Test-Path $jarsigner)) {
-    throw "jarsigner nao encontrado em $jarsigner"
+# 3. Alinhar e Assinar com uber-apk-signer (suporta v1, v2, v3 e zipalign para Android 11+)
+Write-Host "3. Alinhando e assinando APK com uber-apk-signer..." -ForegroundColor Yellow
+$signerJar = "uber-apk-signer.jar"
+if (-not (Test-Path $signerJar)) {
+    throw "uber-apk-signer.jar nao encontrado em $signerJar"
 }
 
-& $jarsigner -keystore $Keystore -storepass $StorePass -keypass $StorePass -sigalg SHA256withRSA -digestalg SHA-256 $OutputApk $KeyAlias
+$signOutput = & $javaExe -jar $signerJar -a $OutputApk --ksDebug $Keystore --overwrite --allowResign --verbose 2>&1
+Write-Host ($signOutput | Out-String)
 
-# 4. Verificar assinatura
-Write-Host "4. Verificando assinatura do APK..." -ForegroundColor Yellow
-$verifyOutput = & $jarsigner -verify $OutputApk 2>&1
+# 4. Verificar assinatura e zipalign
+Write-Host "4. Verificando zipalign e assinatura v1/v2/v3..." -ForegroundColor Yellow
+$verifyOutput = & $javaExe -jar $signerJar -y -a $OutputApk 2>&1
 Write-Host ($verifyOutput | Out-String)
 
-if ($verifyOutput -match "jar verified") {
+if ($verifyOutput -match "zipalign verified" -and $verifyOutput -match "signature verified") {
     $apkSize = (Get-Item $OutputApk).Length
     $sizeMb = [math]::Round($apkSize / 1048576, 2)
     Write-Host "==========================================" -ForegroundColor Green
-    Write-Host "APK compilado e assinado com sucesso!" -ForegroundColor Green
+    Write-Host "APK compilado, alinhado e assinado com sucesso (v1+v2+v3)!" -ForegroundColor Green
     Write-Host ("Arquivo: " + $OutputApk + " (" + $sizeMb + " MB)") -ForegroundColor Green
     Write-Host "==========================================" -ForegroundColor Green
 } else {
-    throw "Falha na verificacao da assinatura do APK."
+    throw "Falha na verificacao da assinatura/zipalign do APK."
 }
