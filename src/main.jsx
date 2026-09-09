@@ -47,15 +47,19 @@ window.fetch = async function (resource, init) {
     const currentBase = getServerUrl();
     const primaryUrl = currentBase ? `${currentBase.replace(/\/$/, '')}${resource}` : resource;
     
+    // GigaMente e transcrição de áudio exigem timeout maior (90s) para o modelo processar
+    const isGigaMenteOrMedia = resource.includes('/gigamente') || resource.includes('/send-media');
+    const reqTimeout = isGigaMenteOrMedia ? 90000 : 15000;
+
     try {
-      return await fetchWithTimeout(primaryUrl, init, 8000);
+      return await fetchWithTimeout(primaryUrl, init, reqTimeout);
     } catch (primaryErr) {
       if (isNativeApp && currentBase !== PRODUCTION_SERVER_URL) {
         // Se falhar em servidor local, tenta a produção na Hostinger
         const fallbackUrl = `${PRODUCTION_SERVER_URL}${resource}`;
         console.warn(`[API Fallback] ${primaryUrl} falhou. Tentando servidor de produção na Hostinger (${fallbackUrl})`);
         try {
-          const fallbackRes = await fetchWithTimeout(fallbackUrl, init, 8000);
+          const fallbackRes = await fetchWithTimeout(fallbackUrl, init, reqTimeout);
           setServerUrl(PRODUCTION_SERVER_URL);
           return fallbackRes;
         } catch (fallbackErr) {

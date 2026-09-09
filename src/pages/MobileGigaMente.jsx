@@ -733,7 +733,7 @@ export default function MobileGigaMente({ onNavigate }) {
       const reader = new FileReader();
       reader.onloadend = async () => {
         const audioBase64 = reader.result;
-        const transcript = speechTranscriptRef.current.trim() || liveRecordingTranscript.trim() || '[Mensagem de voz gravada]';
+        const transcript = speechTranscriptRef.current.trim() || liveRecordingTranscript.trim() || '';
         await sendAudioMessage(audioBase64, transcript);
         setLiveRecordingTranscript('');
       };
@@ -752,12 +752,13 @@ export default function MobileGigaMente({ onNavigate }) {
     setIsSending(true);
     setIsThinking(true);
 
-    const sessionId = await ensureSessionExists('Áudio: ' + transcriptContent.slice(0, 25));
+    const initialTitle = transcriptContent ? ('Áudio: ' + transcriptContent.slice(0, 25)) : 'Mensagem de voz';
+    const sessionId = await ensureSessionExists(initialTitle);
 
     const tempUserMsg = {
       id: `temp-${Date.now()}`,
       sender: 'user',
-      content: transcriptContent,
+      content: transcriptContent || '',
       audio_url: audioBase64,
       timestamp: new Date().toISOString()
     };
@@ -768,7 +769,7 @@ export default function MobileGigaMente({ onNavigate }) {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          content: transcriptContent,
+          content: transcriptContent || '',
           audio_url: audioBase64,
           sender: 'user'
         })
@@ -1246,7 +1247,7 @@ export default function MobileGigaMente({ onNavigate }) {
                         <div className="gm-audio-player-wrapper">
                           <div className="gm-audio-badge">🎙️ Mensagem de Voz</div>
                           <audio controls src={msg.audio_url} className="gm-audio-element" />
-                          {msg.content && msg.content !== '[Mensagem de voz]' && (
+                          {msg.content && !msg.content.startsWith('[Mensagem de voz') && msg.content !== '🎤 Áudio' && (
                             <div className="gm-msg-content gm-audio-transcript">{formatMarkdownContent(msg.content)}</div>
                           )}
                         </div>
