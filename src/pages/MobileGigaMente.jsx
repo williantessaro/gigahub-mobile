@@ -57,6 +57,10 @@ export default function MobileGigaMente({ onNavigate }) {
   const [isCremosaLoading, setIsCremosaLoading] = useState(false);
   const [cremosaFeedback, setCremosaFeedback] = useState(null);
 
+  // Estados para a aba Agentes e Modal de Detalhes
+  const [selectedAgentForModal, setSelectedAgentForModal] = useState(null);
+  const [agentFilter, setAgentFilter] = useState('ALL');
+
   // Estados de Configuração VPS (Interno/Transparente)
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [vpsEngineUrl, setVpsEngineUrl] = useState('http://2.25.114.101:5005/api/gigamente/webhook');
@@ -969,6 +973,105 @@ export default function MobileGigaMente({ onNavigate }) {
     return true;
   });
 
+  const handleStartChatWithAgent = (agent) => {
+    setActiveTab('chat');
+    setSelectedAgentForModal(null);
+    if (agent && agent.defaultPrompt) {
+      setInputText(agent.defaultPrompt);
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+        }
+      }, 200);
+    }
+  };
+
+  const agentsList = [
+    {
+      id: 'gigamente_core',
+      name: 'GigaMente Core',
+      role: 'Motor Estratégico & Multi-agente',
+      category: 'CORE',
+      icon: '🧠',
+      badge: 'Ativo',
+      badgeType: 'active',
+      tag: 'Motor Central VPS',
+      shortDesc: 'Orquestrador central de inteligência, análise de dados e checklist.',
+      fullDesc: 'Motor primário do ecossistema GigaHub. Responsável por planejar ações operacionais, analisar o funil do CRM, processar regras de negócio e orientar tomadas de decisão estratégicas.',
+      highlights: ['Orquestração Multi-agente', 'CheckList Integrado', 'Tomada de Decisão', 'Conexão VPS 24/7'],
+      metrics: [
+        { label: 'Status', val: '🟢 Operacional' },
+        { label: 'Latência', val: '~420ms' },
+        { label: 'Modelo', val: 'VPS Engine' }
+      ],
+      defaultPrompt: 'GigaMente Core, faça um diagnóstico estratégico das nossas prioridades atuais.'
+    },
+    {
+      id: 'cremosa',
+      name: 'CReMosa 2.0',
+      role: 'Gerente Comercial Autônoma',
+      category: 'SALES',
+      icon: '💃',
+      badge: cremosaMetrics.status === 'ACTIVE' ? 'Ativa' : 'Pausada',
+      badgeType: cremosaMetrics.status === 'ACTIVE' ? 'active' : 'standby',
+      tag: 'Voz WhatsApp & Conversão',
+      shortDesc: 'Copiloto de vendas com áudios hiper-realistas e recuperação de leads no WhatsApp.',
+      fullDesc: 'Especialista em fechamento e nutrição comercial. Envia mensagens e áudios com tom humano, respeitando limites anti-bloqueio (CReMosa Protocol 2.0), conduzindo leads pelo funil até o fechamento.',
+      highlights: ['Áudios Naturais WhatsApp', 'Limite Inteligente de Envios', 'Gatilhos de Urgência', 'Sincronia com Kanban'],
+      metrics: [
+        { label: 'Hoje', val: `${cremosaMetrics.today_count}/${cremosaMetrics.today_limit}` },
+        { label: 'Janela', val: cremosaMetrics.window_open ? 'Aberta' : 'Fechada' },
+        { label: 'Velocidade', val: `${ttsRate}x` }
+      ],
+      hasCustomAction: true,
+      customActionLabel: '💃 Painel CReMosa',
+      defaultPrompt: 'Oi CReMosa! Como podemos aumentar a conversão dos leads parados na coluna Proposta hoje?'
+    },
+    {
+      id: 'prospector',
+      name: 'Operador de Prospecção',
+      role: 'Mineração & Validação Ativa',
+      category: 'OPS',
+      icon: '🔍',
+      badge: 'Operacional',
+      badgeType: 'active',
+      tag: 'Mineração de Contatos',
+      shortDesc: 'Varre contatos qualificados, valida números no WhatsApp e cadastra no CRM.',
+      fullDesc: 'Braço de aquisição rápida do GigaHub. Encontra contatos segmentados, verifica se possuem conta ativa no WhatsApp e cadastra automaticamente na coluna Entrada do funil comercial com dados completos.',
+      highlights: ['Varredura Segmentada', 'Validação WhatsApp Real', 'Auto-cadastro no CRM', 'Etiquetagem por Nicho'],
+      metrics: [
+        { label: 'Validador', val: 'Online' },
+        { label: 'Alvo', val: 'B2B / Local' },
+        { label: 'Injeção CRM', val: 'Automática' }
+      ],
+      defaultPrompt: 'Operador de Prospecção, preciso de uma nova lista de contatos qualificados. Como procedemos?'
+    },
+    {
+      id: 'guardiao',
+      name: 'Guardião de Atendimento',
+      role: 'Suporte & Triagem 24/7',
+      category: 'OPS',
+      icon: '🛡️',
+      badge: 'Standby',
+      badgeType: 'standby',
+      tag: 'Triagem & Condomínio',
+      shortDesc: 'Responde dúvidas frequentes, tria chamados de inquilinos e agenda retornos.',
+      fullDesc: 'Atendente de primeira linha para chamados de clientes e moradores do Gestor Prédios. Funciona ininterruptamente, classificando emergências, respondendo perguntas habituais e gerando protocolos.',
+      highlights: ['Atendimento Ininterrupto', 'Triagem de Manutenção', 'Classificação de Urgência', 'Registro Automático'],
+      metrics: [
+        { label: 'Cobertura', val: '24 Horas' },
+        { label: 'Nível', val: 'N1 Triagem' },
+        { label: 'Status', val: 'Aguardando' }
+      ],
+      defaultPrompt: 'Guardião de Atendimento, quais chamados e solicitações de clientes requerem atenção hoje?'
+    }
+  ];
+
+  const filteredAgents = agentsList.filter(ag => {
+    if (agentFilter === 'ALL') return true;
+    return ag.category === agentFilter;
+  });
+
   return (
     <div className="gm-mobile-container dedicated-room" style={{ position: 'relative', overflow: 'hidden' }}>
       {/* GAVETA LATERAL (DRAWER) DE HISTÓRICO DE CHATS */}
@@ -1076,71 +1179,95 @@ export default function MobileGigaMente({ onNavigate }) {
             className="gm-back-btn"
             onClick={() => onNavigate('portal')}
             title="Voltar ao Portal"
-            style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#00a884' }}
           >
-            <span>← Portal</span>
-          </button>
-
-          <button
-            onClick={() => setShowHistoryDrawer(true)}
-            style={{
-              background: 'rgba(255,255,255,0.08)',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '6px 10px',
-              color: '#fff',
-              fontSize: '1rem',
-              cursor: 'pointer'
-            }}
-            title="Abrir Histórico de Chats"
-          >
-            ☰
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12" />
+              <polyline points="12 19 5 12 12 5" />
+            </svg>
+            <span>Portal</span>
           </button>
 
           <div className="gm-title-block">
             <div className="gm-brand-row">
-              <span className="gm-mobile-title">GigaMente AI</span>
-              <div className="gm-status-dot"></div>
+              <span className="gm-mobile-title">
+                {activeTab === 'chat' && 'GigaMente AI'}
+                {activeTab === 'roadmap' && 'CheckList'}
+                {activeTab === 'agents' && 'Agentes'}
+              </span>
+              <div className="gm-status-dot" title="Sistema Operacional" />
             </div>
             <span className="gm-mobile-subtitle">
-              {activeSessionId ? 'Conversa Ativa' : 'Novo Chat em Branco'}
+              {activeTab === 'chat' && (activeSessionId ? 'Conversa Ativa' : 'Pronto para Conversar')}
+              {activeTab === 'roadmap' && `${roadmapItems.length} tarefas mapeadas`}
+              {activeTab === 'agents' && 'Equipe Autônoma Ativa'}
             </span>
           </div>
         </div>
 
         <div className="gm-mobile-header-actions">
-          <button
-            className={`gm-call-pill-btn ${isInLiveCall ? 'active' : ''}`}
-            onClick={toggleLiveCall}
-            title={isInLiveCall ? 'Encerrar Chamada ao Vivo' : 'Iniciar Chamada de Voz ao Vivo (Falar & Ouvir)'}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-            </svg>
-            <span>{isInLiveCall ? 'Ao Vivo' : 'Ao Vivo'}</span>
-          </button>
+          {activeTab === 'chat' && (
+            <>
+              <button
+                className={`gm-call-pill-btn ${isInLiveCall ? 'active' : ''}`}
+                onClick={toggleLiveCall}
+                title={isInLiveCall ? 'Encerrar Chamada ao Vivo' : 'Iniciar Chamada de Voz ao Vivo (Falar & Ouvir)'}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                </svg>
+                <span>{isInLiveCall ? 'Ao Vivo' : 'Voz'}</span>
+              </button>
 
-          <button className="gm-icon-btn" onClick={handleStartNewChat} title="Nova Conversa">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
-          <button
-            className="gm-icon-btn"
-            onClick={() => setShowCremosaModal(true)}
-            title="CReMosa 2.0"
-            style={{
-              background: cremosaMetrics.status === 'ACTIVE' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)',
-              border: `1px solid ${cremosaMetrics.status === 'ACTIVE' ? '#10b981' : '#f43f5e'}`,
-              borderRadius: '8px',
-              padding: '2px 6px',
-              fontSize: '0.85rem'
-            }}
-          >
-            💃
-          </button>
-          <button className="gm-icon-btn" onClick={() => setShowConfigModal(true)} title="Ajustes de Voz">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <button className="gm-icon-btn" onClick={handleStartNewChat} title="Novo Chat em Branco">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+
+              <button
+                className="gm-icon-btn"
+                onClick={() => setShowHistoryDrawer(true)}
+                title="Histórico de Conversas"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M3 12h18M3 6h18M3 18h18" />
+                </svg>
+              </button>
+            </>
+          )}
+
+          {activeTab === 'roadmap' && (
+            <button
+              className="gm-icon-btn"
+              onClick={fetchRoadmap}
+              title="Atualizar Checklist"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M23 4v6h-6" />
+                <path d="M1 20v-6h6" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+            </button>
+          )}
+
+          {activeTab === 'agents' && (
+            <button
+              className="gm-icon-btn"
+              onClick={() => setShowCremosaModal(true)}
+              title="Painel CReMosa 2.0"
+              style={{
+                background: cremosaMetrics.status === 'ACTIVE' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                border: `1px solid ${cremosaMetrics.status === 'ACTIVE' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)'}`,
+                color: '#fff',
+                fontSize: '1rem'
+              }}
+            >
+              💃
+            </button>
+          )}
+
+          <button className="gm-icon-btn" onClick={() => setShowConfigModal(true)} title="Ajustes de Voz & Motor">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
@@ -1214,6 +1341,9 @@ export default function MobileGigaMente({ onNavigate }) {
           <div className="gm-chat-pane">
             {/* CHIPS DE ATALHO RÁPIDO */}
             <div className="gm-chips-scroll">
+              <button className="gm-chip" onClick={() => handleQuickChipClick('Oi CReMosa! Como estão as abordagens dos leads de hoje e o funil comercial?')}>
+                💃 Falar com CReMosa
+              </button>
               <button className="gm-chip" onClick={() => handleQuickChipClick('Resumo de vendas do dia e status de leads')}>
                 📊 Resumo do Dia
               </button>
@@ -1399,31 +1529,109 @@ export default function MobileGigaMente({ onNavigate }) {
         {activeTab === 'agents' && (
           <div className="gm-agents-pane">
             <div className="gm-agents-header">
-              <h3>🤖 Agentes Inteligentes GigaHub</h3>
-              <p>Equipe autônoma disponível para suporte comercial, funil e automações.</p>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '700', color: '#fff' }}>
+                  🤖 Agentes Inteligentes GigaHub
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#8696a0' }}>
+                  Selecione um agente para conversar diretamente, ver parâmetros ou abrir o painel.
+                </p>
+              </div>
+
+              {/* FILTRO DE CATEGORIAS */}
+              <div className="gm-filter-chips" style={{ marginTop: '12px', display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+                <button
+                  className={`gm-chip ${agentFilter === 'ALL' ? 'active' : ''}`}
+                  onClick={() => setAgentFilter('ALL')}
+                >
+                  Todos ({agentsList.length})
+                </button>
+                <button
+                  className={`gm-chip ${agentFilter === 'SALES' ? 'active' : ''}`}
+                  onClick={() => setAgentFilter('SALES')}
+                >
+                  💃 Vendas
+                </button>
+                <button
+                  className={`gm-chip ${agentFilter === 'CORE' ? 'active' : ''}`}
+                  onClick={() => setAgentFilter('CORE')}
+                >
+                  🧠 Estratégia
+                </button>
+                <button
+                  className={`gm-chip ${agentFilter === 'OPS' ? 'active' : ''}`}
+                  onClick={() => setAgentFilter('OPS')}
+                >
+                  ⚙️ Operações
+                </button>
+              </div>
             </div>
 
             <div className="gm-agents-grid">
-              <div className="gm-agent-card">
-                <div className="gm-agent-badge active">Ativo</div>
-                <div className="gm-agent-icon">🧠</div>
-                <h4 className="gm-agent-name">GigaMente Core</h4>
-                <p className="gm-agent-desc">Motor estratégico central e executor de tarefas e integrações.</p>
-              </div>
+              {filteredAgents.map(agent => (
+                <div
+                  key={agent.id}
+                  className="gm-agent-card interactive"
+                  onClick={() => setSelectedAgentForModal(agent)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="gm-agent-card-top">
+                    <div className="gm-agent-icon-wrapper">
+                      <span className="gm-agent-icon">{agent.icon}</span>
+                    </div>
+                    <div className="gm-agent-title-col">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <h4 className="gm-agent-name">{agent.name}</h4>
+                        <span className={`gm-agent-badge ${agent.badgeType}`}>{agent.badge}</span>
+                      </div>
+                      <span className="gm-agent-role">{agent.role}</span>
+                    </div>
+                  </div>
 
-              <div className="gm-agent-card">
-                <div className="gm-agent-badge active">Ativo</div>
-                <div className="gm-agent-icon">💃</div>
-                <h4 className="gm-agent-name">CReMosa</h4>
-                <p className="gm-agent-desc">Copiloto conversacional de vendas, áudios e estratégia de funil comercial.</p>
-              </div>
+                  <p className="gm-agent-desc">{agent.shortDesc}</p>
 
-              <div className="gm-agent-card">
-                <div className="gm-agent-badge standby">Operacional</div>
-                <div className="gm-agent-icon">🔍</div>
-                <h4 className="gm-agent-name">Operador de Prospecção</h4>
-                <p className="gm-agent-desc">Busca contatos, valida números no WhatsApp e cadastra Leads no CRM.</p>
-              </div>
+                  <div className="gm-agent-tags">
+                    <span className="gm-agent-tag">{agent.tag}</span>
+                    {agent.metrics?.map((m, idx) => (
+                      <span key={idx} className="gm-agent-metric-pill">
+                        <strong>{m.label}:</strong> {m.val}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="gm-agent-card-actions" onClick={e => e.stopPropagation()}>
+                    <button
+                      className="gm-agent-btn-primary"
+                      onClick={() => handleStartChatWithAgent(agent)}
+                      title={`Conversar com ${agent.name}`}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 1 1-7.6-7.6 8.38 8.38 0 0 1 3.8.9L21 3z" />
+                      </svg>
+                      <span>Conversar</span>
+                    </button>
+
+                    {agent.hasCustomAction ? (
+                      <button
+                        className="gm-agent-btn-secondary"
+                        onClick={() => setShowCremosaModal(true)}
+                        title="Abrir Painel CReMosa"
+                      >
+                        <span>💃 Painel</span>
+                      </button>
+                    ) : (
+                      <button
+                        className="gm-agent-btn-secondary"
+                        onClick={() => setSelectedAgentForModal(agent)}
+                        title="Ver Detalhes do Agente"
+                      >
+                        <span>Detalhes →</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -1723,6 +1931,166 @@ export default function MobileGigaMente({ onNavigate }) {
             >
               Fechar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL BOTTOM-SHEET PARA DETALHES DO AGENTE */}
+      {selectedAgentForModal && (
+        <div className="gm-bottom-sheet-overlay" onClick={() => setSelectedAgentForModal(null)}>
+          <div
+            className="gm-bottom-sheet"
+            onClick={e => e.stopPropagation()}
+            style={{ maxHeight: '85vh', overflowY: 'auto' }}
+          >
+            <div className="gm-sheet-handle"></div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '52px',
+                  height: '52px',
+                  borderRadius: '16px',
+                  background: 'rgba(0, 168, 132, 0.15)',
+                  border: '1px solid rgba(0, 168, 132, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '2rem'
+                }}>
+                  {selectedAgentForModal.icon}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '800', color: '#fff' }}>
+                    {selectedAgentForModal.name}
+                  </h3>
+                  <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                    {selectedAgentForModal.role}
+                  </div>
+                </div>
+              </div>
+
+              <span className={`gm-agent-badge ${selectedAgentForModal.badgeType}`} style={{ position: 'static' }}>
+                {selectedAgentForModal.badge}
+              </span>
+            </div>
+
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '12px',
+              padding: '14px',
+              marginBottom: '16px'
+            }}>
+              <p style={{ margin: 0, fontSize: '0.88rem', color: '#e2e8f0', lineHeight: '1.5' }}>
+                {selectedAgentForModal.fullDesc}
+              </p>
+            </div>
+
+            {/* DESTAQUES / CAPACIDADES */}
+            <div style={{ marginBottom: '16px' }}>
+              <h4 style={{ margin: '0 0 10px', fontSize: '0.85rem', fontWeight: '700', color: '#00a884', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                ⚡ Principais Capacidades
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {selectedAgentForModal.highlights?.map((hl, idx) => (
+                  <div key={idx} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '0.84rem',
+                    color: '#cbd5e1',
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255, 255, 255, 0.05)'
+                  }}>
+                    <span style={{ color: '#00a884' }}>✔</span>
+                    <span>{hl}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* TELEMETRIA / MÉTRICAS */}
+            {selectedAgentForModal.metrics?.length > 0 && (
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ margin: '0 0 10px', fontSize: '0.85rem', fontWeight: '700', color: '#00a884', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  📊 Telemetria Operacional
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                  {selectedAgentForModal.metrics.map((m, idx) => (
+                    <div key={idx} style={{
+                      background: 'rgba(17, 27, 33, 0.8)',
+                      border: '1px solid rgba(255, 255, 255, 0.06)',
+                      borderRadius: '10px',
+                      padding: '10px 8px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginBottom: '4px' }}>{m.label}</div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: '700', color: '#fff' }}>{m.val}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* AÇÕES */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button
+                className="gm-btn-primary"
+                style={{ width: '100%', padding: '12px', fontSize: '0.95rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                onClick={() => handleStartChatWithAgent(selectedAgentForModal)}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 1 1-7.6-7.6 8.38 8.38 0 0 1 3.8.9L21 3z" />
+                </svg>
+                <span>Conversar com {selectedAgentForModal.name}</span>
+              </button>
+
+              {selectedAgentForModal.id === 'cremosa' && (
+                <button
+                  type="button"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '0.9rem',
+                    background: 'rgba(236, 72, 153, 0.15)',
+                    color: '#f472b6',
+                    border: '1px solid rgba(236, 72, 153, 0.3)',
+                    borderRadius: '10px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
+                  onClick={() => {
+                    setSelectedAgentForModal(null);
+                    setShowCremosaModal(true);
+                  }}
+                >
+                  <span>💃 Abrir Painel Completo da CReMosa</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  fontSize: '0.85rem',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+                onClick={() => setSelectedAgentForModal(null)}
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}
