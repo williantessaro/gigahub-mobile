@@ -75,6 +75,16 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
   const audioStreamRef = useRef(null);
   const recordingTimerRef = useRef(null);
 
+  // Criar Novo Lead via Busca de WhatsApp
+  const [isCreateLeadModalOpen, setIsCreateLeadModalOpen] = useState(false);
+  const [newLeadPhone, setNewLeadPhone] = useState('');
+  const [newLeadName, setNewLeadName] = useState('');
+  const [newLeadStore, setNewLeadStore] = useState('');
+  const [newLeadDescription, setNewLeadDescription] = useState('');
+  const [newLeadStage, setNewLeadStage] = useState('');
+  const [newLeadLoading, setNewLeadLoading] = useState(false);
+  const [newLeadError, setNewLeadError] = useState('');
+
   const getAuthHeaders = () => {
     const token = localStorage.getItem('crm-token') || localStorage.getItem('portal_token') || '';
     return {
@@ -83,12 +93,113 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     };
   };
 
+  // Extrair número de telefone/WhatsApp limpo a partir do termo de busca
+  const getSearchPhone = (term) => {
+    if (!term) return null;
+    const cleaned = term.replace(/\D/g, '');
+    if (cleaned.length >= 10 && cleaned.length <= 13) {
+      let phone = cleaned;
+      if (phone.length === 10 || phone.length === 11) {
+        phone = '55' + phone;
+      }
+      return phone;
+    }
+    return null;
+  };
+
+  const detectedPhone = getSearchPhone(searchTerm);
+  const existingLeadForPhone = detectedPhone
+    ? leads.find(l => (l.whatsapp || '').replace(/\D/g, '') === detectedPhone)
+    : null;
+
+  const openCreateLeadModalFromSearch = () => {
+    if (!detectedPhone) return;
+    setNewLeadPhone(detectedPhone);
+    setNewLeadName('');
+    setNewLeadStore('');
+    setNewLeadDescription('');
+    setNewLeadStage(stages[0]?.id || 'Novo');
+    setNewLeadError('');
+    setIsCreateLeadModalOpen(true);
+  };
+
+  const handleCreateLeadFromSearchSubmit = async (e) => {
+    e.preventDefault();
+    setNewLeadError('');
+    if (!newLeadPhone.trim()) {
+      setNewLeadError('O telefone WhatsApp é obrigatório.');
+      return;
+    }
+
+    setNewLeadLoading(true);
+
+    try {
+      const selectedStage = newLeadStage || stages[0]?.id || 'Novo';
+      const payload = {
+        whatsapp: newLeadPhone,
+        nome: newLeadName.trim() || newLeadPhone,
+        nome_loja: newLeadStore.trim(),
+        description: newLeadDescription.trim(),
+        categoria: newLeadDescription.trim(),
+        status: selectedStage,
+        lista: selectedStage,
+        funil: currentFunnelId,
+        origem: 'gigacrm'
+      };
+
+      const res = await fetch('/backend/api/pessoas', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        const createdPessoa = (data && (data.pessoa || data.lead || (data.id ? data : null)));
+
+        const leadToOpen = createdPessoa ? {
+          ...createdPessoa,
+          whatsapp: createdPessoa.whatsapp || newLeadPhone,
+          nome: createdPessoa.nome || newLeadName.trim() || newLeadPhone,
+          nome_loja: createdPessoa.nome_loja || newLeadStore.trim(),
+          description: createdPessoa.description || newLeadDescription.trim(),
+          status: createdPessoa.status || selectedStage,
+          lista: createdPessoa.lista || selectedStage
+        } : {
+          id: newLeadPhone,
+          whatsapp: newLeadPhone,
+          nome: newLeadName.trim() || newLeadPhone,
+          nome_loja: newLeadStore.trim(),
+          description: newLeadDescription.trim(),
+          categoria: newLeadDescription.trim(),
+          status: selectedStage,
+          lista: selectedStage,
+          funil: currentFunnelId,
+          origem: 'gigacrm'
+        };
+
+        setIsCreateLeadModalOpen(false);
+        setSearchTerm('');
+        await loadData(true);
+        openLeadModal(leadToOpen);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setNewLeadError(errData.error || errData.message || 'Erro ao cadastrar lead.');
+      }
+    } catch (err) {
+      console.error('Erro ao salvar lead:', err);
+      setNewLeadError('Erro de conexão ao cadastrar lead.');
+    } finally {
+      setNewLeadLoading(false);
+    }
+  };
+
   // Notifica o App se algum modal estiver aberto (para controle do botão Voltar nativo do Android)
   useEffect(() => {
     if (onModalStateChange) {
-      onModalStateChange(Boolean(activeModalLead || isScheduleOpen || quickMoveLead || isCreatingFunnel || isCreatingStage));
+      onModalStateChange(Boolean(activeModalLead || isScheduleOpen || quickMoveLead || isCreatingFunnel || isCreatingStage || isCreateLeadModalOpen));
     }
-  }, [activeModalLead, isScheduleOpen, quickMoveLead, isCreatingFunnel, isCreatingStage, onModalStateChange]);
+  }, [activeModalLead, isScheduleOpen, quickMoveLead, isCreatingFunnel, isCreatingStage, isCreateLeadModalOpen, onModalStateChange]);
 
   // Carregar lista de funis da API
   const loadFunnelsList = async () => {
@@ -853,7 +964,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
               style={{
                 position: 'absolute',
                 right: '8px',
-                top: '50%',
+                top: detectedPhone && !existingLeadForPhone ? '22px' : '50%',
                 transform: 'translateY(-50%)',
                 background: 'none',
                 border: 'none',
@@ -864,6 +975,33 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
               }}
             >
               ✕
+            </button>
+          )}
+
+          {detectedPhone && !existingLeadForPhone && (
+            <button
+              type="button"
+              onClick={openCreateLeadModalFromSearch}
+              style={{
+                marginTop: '8px',
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg, #ff6600, #ea580c)',
+                color: '#fff',
+                border: 'none',
+                fontWeight: '700',
+                fontSize: '0.84rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(255, 102, 0, 0.4)'
+              }}
+            >
+              <span>➕</span>
+              <span>Salvar Lead: {detectedPhone}</span>
             </button>
           )}
         </div>
@@ -1995,6 +2133,228 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                   style={{ padding: '8px 16px', borderRadius: '8px', background: '#0284c7', border: 'none', color: '#fff', fontWeight: '700', cursor: 'pointer' }}
                 >
                   Criar Coluna
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CRIAR LEAD VIA BUSCA DE WHATSAPP */}
+      {isCreateLeadModalOpen && (
+        <div
+          onClick={() => setIsCreateLeadModalOpen(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.8)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#161f2e',
+              borderRadius: '16px',
+              padding: '20px',
+              width: '100%',
+              maxWidth: '400px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              border: '1px solid rgba(255,255,255,0.1)',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#fff', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>👤</span> Salvar Novo Lead
+              </h3>
+              <button
+                onClick={() => setIsCreateLeadModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.1rem', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {newLeadError && (
+              <div style={{
+                padding: '8px 12px',
+                borderRadius: '8px',
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#f87171',
+                fontSize: '0.80rem'
+              }}>
+                {newLeadError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateLeadFromSearchSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '4px', fontWeight: '600' }}>
+                  WhatsApp / Telefone
+                </label>
+                <input
+                  type="text"
+                  value={newLeadPhone}
+                  readOnly
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    background: '#0d1117',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#ff6600',
+                    fontWeight: '700',
+                    fontSize: '0.88rem',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '4px', fontWeight: '600' }}>
+                  Nome do Lead
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: João da Silva"
+                  value={newLeadName}
+                  onChange={e => setNewLeadName(e.target.value)}
+                  autoFocus
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    background: '#0d1117',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#fff',
+                    fontSize: '0.85rem',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '4px', fontWeight: '600' }}>
+                  Nome da Loja / Empresa
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Mercado Central"
+                  value={newLeadStore}
+                  onChange={e => setNewLeadStore(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    background: '#0d1117',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#fff',
+                    fontSize: '0.85rem',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '4px', fontWeight: '600' }}>
+                  Descrição / Observações
+                </label>
+                <textarea
+                  placeholder="Observações sobre o lead..."
+                  value={newLeadDescription}
+                  onChange={e => setNewLeadDescription(e.target.value)}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    background: '#0d1117',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#fff',
+                    fontSize: '0.85rem',
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '4px', fontWeight: '600' }}>
+                  Etapa Inicial do Funil
+                </label>
+                <select
+                  value={newLeadStage}
+                  onChange={e => setNewLeadStage(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    background: '#0d1117',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#fff',
+                    fontSize: '0.85rem',
+                    boxSizing: 'border-box',
+                    outline: 'none'
+                  }}
+                >
+                  {stages.map(st => (
+                    <option key={st.id} value={st.id}>
+                      {st.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsCreateLeadModalOpen(false)}
+                  disabled={newLeadLoading}
+                  style={{
+                    padding: '9px 14px',
+                    borderRadius: '8px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={newLeadLoading}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: '8px',
+                    background: '#ff6600',
+                    border: 'none',
+                    color: '#fff',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  {newLeadLoading ? 'Salvando...' : 'Salvar Lead'}
                 </button>
               </div>
             </form>
