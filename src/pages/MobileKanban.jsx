@@ -135,12 +135,17 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
 
     try {
       const selectedStage = newLeadStage || stages[0]?.id || 'Novo';
+      const descTrimmed = newLeadDescription.trim();
       const payload = {
         whatsapp: newLeadPhone,
         nome: newLeadName.trim() || newLeadPhone,
         nome_loja: newLeadStore.trim(),
-        description: newLeadDescription.trim(),
-        categoria: newLeadDescription.trim(),
+        description: descTrimmed,
+        descricao: descTrimmed,
+        observacao: descTrimmed,
+        observacoes: descTrimmed,
+        categoria: descTrimmed,
+        notes: descTrimmed,
         status: selectedStage,
         lista: selectedStage,
         funil: currentFunnelId,
@@ -162,7 +167,12 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
           whatsapp: createdPessoa.whatsapp || newLeadPhone,
           nome: createdPessoa.nome || newLeadName.trim() || newLeadPhone,
           nome_loja: createdPessoa.nome_loja || newLeadStore.trim(),
-          description: createdPessoa.description || newLeadDescription.trim(),
+          description: createdPessoa.description || createdPessoa.descricao || createdPessoa.observacoes || createdPessoa.observacao || createdPessoa.categoria || descTrimmed,
+          descricao: createdPessoa.descricao || descTrimmed,
+          observacao: createdPessoa.observacao || descTrimmed,
+          observacoes: createdPessoa.observacoes || descTrimmed,
+          categoria: createdPessoa.categoria || descTrimmed,
+          notes: createdPessoa.notes || descTrimmed,
           status: createdPessoa.status || selectedStage,
           lista: createdPessoa.lista || selectedStage
         } : {
@@ -170,8 +180,12 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
           whatsapp: newLeadPhone,
           nome: newLeadName.trim() || newLeadPhone,
           nome_loja: newLeadStore.trim(),
-          description: newLeadDescription.trim(),
-          categoria: newLeadDescription.trim(),
+          description: descTrimmed,
+          descricao: descTrimmed,
+          observacao: descTrimmed,
+          observacoes: descTrimmed,
+          categoria: descTrimmed,
+          notes: descTrimmed,
           status: selectedStage,
           lista: selectedStage,
           funil: currentFunnelId,
@@ -544,14 +558,19 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
   const openLeadModal = (lead) => {
     setActiveModalLead(lead);
     setModalTab('chat');
+    const descVal = lead.description || lead.descricao || lead.observacoes || lead.observacao || lead.categoria || lead.notes || '';
     setEditedLeadData({
       nome: lead.nome || '',
       nome_loja: lead.nome_loja || '',
       whatsapp: lead.whatsapp || '',
       email: lead.email || '',
       cidade: lead.cidade || '',
-      categoria: lead.categoria || lead.description || '',
-      description: lead.description || lead.categoria || '',
+      categoria: descVal,
+      description: descVal,
+      descricao: descVal,
+      observacao: descVal,
+      observacoes: descVal,
+      notes: descVal,
       status: lead.status || lead.lista || stages[0]?.id
     });
   };
@@ -563,10 +582,21 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
 
     setIsSavingLead(true);
     try {
+      const descVal = editedLeadData.description || editedLeadData.descricao || editedLeadData.observacoes || editedLeadData.observacao || editedLeadData.categoria || editedLeadData.notes || '';
+      const payloadToSave = {
+        ...editedLeadData,
+        description: descVal,
+        descricao: descVal,
+        observacao: descVal,
+        observacoes: descVal,
+        categoria: descVal,
+        notes: descVal
+      };
+
       const res = await fetch(`/backend/api/pessoas/${activeModalLead.id}`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify(editedLeadData)
+        body: JSON.stringify(payloadToSave)
       });
 
       if (res.ok) {
@@ -1114,7 +1144,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                   </div>
                 ) : (
                   stageLeads.map((lead) => {
-                    const desc = lead.description || lead.categoria || '';
+                    const desc = lead.description || lead.descricao || lead.observacoes || lead.observacao || lead.categoria || lead.notes || '';
                     const isCopiloto = desc.includes('💡 [Copiloto CReMosa]');
                     const returnDateMatch = desc.match(/(?:retorno|data prevista|agendado para|agendado|geladeira)[:\s]+([0-9]{2}\/[0-9]{2}(?:\/[0-9]{2,4})?|[0-9]{4}-[0-9]{2}-[0-9]{2})/i);
                     const returnDate = lead.data_retorno || (returnDateMatch ? returnDateMatch[1] : null);
@@ -1826,12 +1856,19 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                   </label>
                   <textarea
                     rows={4}
-                    value={editedLeadData.description || editedLeadData.categoria || ''}
-                    onChange={e => setEditedLeadData(prev => ({
-                      ...prev,
-                      description: e.target.value,
-                      categoria: e.target.value
-                    }))}
+                    value={editedLeadData.description || editedLeadData.descricao || editedLeadData.observacoes || editedLeadData.observacao || editedLeadData.categoria || editedLeadData.notes || ''}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEditedLeadData(prev => ({
+                        ...prev,
+                        description: val,
+                        descricao: val,
+                        observacao: val,
+                        observacoes: val,
+                        categoria: val,
+                        notes: val
+                      }));
+                    }}
                     style={{
                       width: '100%',
                       padding: '9px 12px',
