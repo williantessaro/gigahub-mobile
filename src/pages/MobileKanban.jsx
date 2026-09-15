@@ -797,7 +797,29 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     setScheduleMsgStatus('');
 
     const scheduledAt = `${scheduleDate}T${scheduleTime}:00`;
-    const cleanPhone = String(activeModalLead.whatsapp || '').split('@')[0].replace(/\D/g, '');
+    const dateObj = new Date(scheduledAt);
+    if (isNaN(dateObj.getTime())) {
+      setScheduleMsgStatus('❌ Data ou horário inválido.');
+      setScheduleLoading(false);
+      return;
+    }
+
+    const rawPhone = activeModalLead.whatsapp || activeModalLead.phone || activeModalLead.id || activeModalLead.jid || '';
+    const cleanPhone = String(rawPhone).split('@')[0].replace(/\D/g, '');
+
+    if (!cleanPhone) {
+      setScheduleMsgStatus('❌ Telefone do lead não encontrado.');
+      setScheduleLoading(false);
+      return;
+    }
+
+    let credentials = null;
+    try {
+      const rawCreds = localStorage.getItem('crm-credentials');
+      if (rawCreds) credentials = JSON.parse(rawCreds);
+    } catch (err) {
+      console.warn('Erro ao obter credenciais:', err);
+    }
 
     try {
       const res = await fetch('/backend/api/schedule', {
@@ -806,9 +828,11 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
         body: JSON.stringify({
           phone: cleanPhone,
           text: scheduleText,
-          scheduledAt: new Date(scheduledAt).toISOString(),
+          scheduledAt: dateObj.toISOString(),
           clientId: activeModalLead.id,
-          nome: activeModalLead.nome,
+          nome: activeModalLead.nome || activeModalLead.nome_loja || cleanPhone,
+          channel_id: activeModalLead.channel_id || null,
+          credentials,
           origem: 'gigacrm'
         })
       });
@@ -823,9 +847,11 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
           setScheduleMsgStatus('');
         }, 1500);
       } else {
-        setScheduleMsgStatus('❌ Falha ao agendar mensagem.');
+        const errData = await res.json().catch(() => ({}));
+        setScheduleMsgStatus(`❌ Falha ao agendar: ${errData.error || 'Erro no servidor'}`);
       }
     } catch (err) {
+      console.error('Erro ao agendar mensagem:', err);
       setScheduleMsgStatus('❌ Erro de conexão ao agendar.');
     } finally {
       setScheduleLoading(false);
@@ -1672,7 +1698,15 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                 >
                   <button
                     type="button"
-                    onClick={() => setIsScheduleOpen(true)}
+                    onClick={() => {
+                      if (chatInputText.trim() && !scheduleText.trim()) {
+                        setScheduleText(chatInputText);
+                      }
+                      if (!scheduleDate) {
+                        setScheduleDate(new Date().toISOString().split('T')[0]);
+                      }
+                      setIsScheduleOpen(true);
+                    }}
                     style={{
                       background: 'none',
                       border: 'none',
