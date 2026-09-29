@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import AudioMessagePlayer, { getAudioSource, isAudioMessage, formatMediaUrl } from '../components/AudioMessagePlayer';
+import { AudioRecorder } from '../utils/audioRecorder';
 
 // Listas canônicas padrão para fallback caso a API ainda não tenha retornado
 const CANONICAL_FUNNELS = [
@@ -71,6 +73,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef(null);
+  const wavRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const audioStreamRef = useRef(null);
   const recordingTimerRef = useRef(null);
@@ -634,7 +637,18 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
 
       if (res.ok) {
         const msgs = await res.json();
-        setChatMessages(Array.isArray(msgs) ? msgs : []);
+        if (Array.isArray(msgs)) {
+          const seen = new Set();
+          const uniqueMsgs = msgs.filter(msg => {
+            const key = msg.id || msg.key?.id || `${msg.timestamp || ''}_${msg.sender || ''}_${msg.text || msg.mediaUrl || ''}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          setChatMessages(uniqueMsgs);
+        } else {
+          setChatMessages([]);
+        }
       }
     } catch (err) {
       console.error('Erro ao carregar mensagens:', err);
@@ -667,8 +681,11 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
 
   // Envio de Mensagem de Texto no WhatsApp
   const handleSendChatMessage = async (e) => {
-    if (e) e.preventDefault();
-    if (!chatInputText.trim() || !activeModalLead || isSendingMsg) return;
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!chatInputText.trim() || !activeModalLead || isSendingMsg || isRecordingAudio) return;
 
     const text = chatInputText.trim();
     setChatInputText('');
@@ -686,11 +703,30 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     setChatMessages(prev => [...prev, tempMsg]);
 
     try {
-      const res = await fetch(`/backend/api/chats/${jid}/messages`, {
+      const payload = {
+        message: text,
+        text: text,
+        body: text,
+        content: text,
+        remoteJid: jid,
+        origem: 'gigacrm',
+        channel_id: activeModalLead.channel_id || null,
+        nome: activeModalLead.nome || activeModalLead.whatsapp
+      };
+
+      let res = await fetch('/backend/api/messages/send', {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ message: text, origem: 'gigacrm' })
+        body: JSON.stringify(payload)
       });
+
+      if (!res.ok) {
+        res = await fetch(`/backend/api/chats/${jid}/messages`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload)
+        });
+      }
 
       if (res.ok) {
         loadChatMessages(activeModalLead.whatsapp, true);
@@ -702,64 +738,57 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     }
   };
 
-  // Gravação de Áudio
-  const startAudioRecording = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      alert('Gravação de áudio não suportada no seu dispositivo.');
-      return;
+  // Limpar recursos de áudio
+  const stopAudioStream = () => {
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach(track => track.stop());
+      audioStreamRef.current = null;
     }
+  };
 
+  // Gravação de Áudio PCM WAV (Duração 100% Exata)
+  const startAudioRecording = async () => {
+    if (isRecordingAudio || isSendingMsg) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
-
-      let options = {};
-      if (MediaRecorder.isTypeSupported('audio/webm')) options = { mimeType: 'audio/webm' };
-      else if (MediaRecorder.isTypeSupported('audio/mp4')) options = { mimeType: 'audio/mp4' };
-
-      const recorder = new MediaRecorder(stream, options);
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      mediaRecorderRef.current = recorder;
-      recorder.start(100);
+      const recorder = new AudioRecorder();
+      wavRecorderRef.current = recorder;
+      await recorder.start();
 
       setIsRecordingAudio(true);
       setRecordingSeconds(0);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds(prev => prev + 1);
       }, 1000);
     } catch (err) {
-      alert('Permissão de microfone negada ou erro ao gravar.');
+      console.error('Erro ao acessar microfone:', err);
+      alert('Permissão de microfone negada ou erro ao iniciar gravação.');
+      setIsRecordingAudio(false);
     }
   };
 
   const cancelAudioRecording = () => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.ondataavailable = null;
-      mediaRecorderRef.current.stop();
-    }
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach(t => t.stop());
+    if (wavRecorderRef.current) {
+      wavRecorderRef.current.cancel();
+      wavRecorderRef.current = null;
     }
     setIsRecordingAudio(false);
     setRecordingSeconds(0);
-    audioChunksRef.current = [];
   };
 
-  const finishAndSendAudio = () => {
-    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return;
+  const finishAndSendAudio = async () => {
+    if (!wavRecorderRef.current || !isRecordingAudio || !activeModalLead) return;
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
 
-    const recorder = mediaRecorderRef.current;
-    recorder.onstop = async () => {
-      const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(t => t.stop());
+    try {
+      const audioBlob = await wavRecorderRef.current.stop();
+      wavRecorderRef.current = null;
+      setIsRecordingAudio(false);
+      setRecordingSeconds(0);
+
+      if (!audioBlob || audioBlob.size < 500) {
+        return;
       }
 
       const reader = new FileReader();
@@ -768,24 +797,60 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
         const cleanPhone = String(activeModalLead.whatsapp).replace(/\D/g, '');
         const jid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
 
+        // UI Otimista para o áudio
+        const nowSec = Date.now() / 1000;
+        const tempMsg = {
+          id: `temp-audio-${Date.now()}`,
+          fromMe: true,
+          sender: 'me',
+          text: '🎤 Áudio',
+          mediaUrl: audioBase64,
+          audioUrl: audioBase64,
+          audio: audioBase64,
+          mediaType: 'ptt',
+          type: 'ptt',
+          timestamp: nowSec
+        };
+        setChatMessages(prev => [...prev, tempMsg]);
+
         try {
-          await fetch(`/backend/api/chats/${jid}/messages`, {
+          const sendRes = await fetch('/backend/api/messages/send-media', {
             method: 'POST',
             headers: getAuthHeaders(),
-            body: JSON.stringify({ audio: audioBase64, origem: 'gigacrm' })
+            body: JSON.stringify({
+              remoteJid: jid,
+              type: 'ptt',
+              mediaUrl: audioBase64,
+              audio: audioBase64,
+              channel_id: activeModalLead.channel_id || null,
+              nome: activeModalLead.nome || activeModalLead.whatsapp,
+              origem: 'gigacrm'
+            })
           });
+
+          if (!sendRes.ok) {
+            await fetch(`/backend/api/chats/${jid}/messages`, {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: JSON.stringify({
+                audio: audioBase64,
+                mediaUrl: audioBase64,
+                type: 'ptt',
+                origem: 'gigacrm'
+              })
+            });
+          }
           loadChatMessages(activeModalLead.whatsapp, true);
         } catch (e) {
           console.error('Erro ao enviar áudio do WhatsApp:', e);
         }
       };
       reader.readAsDataURL(audioBlob);
-
+    } catch (err) {
+      console.error('Erro ao finalizar gravação:', err);
       setIsRecordingAudio(false);
       setRecordingSeconds(0);
-    };
-
-    recorder.stop();
+    }
   };
 
   // Agendamento de Mensagem
@@ -1606,7 +1671,22 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                   </div>
                 ) : (
                   chatMessages.map((msg, idx) => {
-                    const isMe = Boolean(msg.fromMe || msg.sender === 'user' || msg.sender === 'me');
+                    const isMe = Boolean(
+                      msg.sender === 'me' || 
+                      msg.sender === 'agent' ||
+                      msg.sender === 'operator' ||
+                      msg.sender === 'system' ||
+                      msg.fromMe === true || 
+                      msg.fromMe === 1 || 
+                      msg.fromMe === 'true' || 
+                      msg.key?.fromMe === true || 
+                      msg.direction === 'out' || 
+                      msg.direction === 'outgoing'
+                    );
+                    const audioSrc = getAudioSource(msg);
+                    const isAudio = isAudioMessage(msg, audioSrc);
+                    const rawText = msg.text || msg.body || msg.content || '';
+                    const isImage = msg.mediaType === 'image' || (msg.mediaUrl && (msg.mediaUrl.startsWith('data:image') || msg.mediaUrl.match(/\.(jpeg|jpg|png|webp|gif)($|\?)/i)));
 
                     return (
                       <div
@@ -1627,13 +1707,28 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                           wordBreak: 'break-word',
                           boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
                         }}>
-                          {msg.mediaUrl || msg.audioUrl ? (
-                            <div>
-                              <div style={{ fontSize: '0.70rem', color: 'rgba(255,255,255,0.7)', marginBottom: '4px' }}>🎙️ Áudio</div>
-                              <audio controls src={msg.mediaUrl || msg.audioUrl} style={{ width: '100%', height: '34px' }} />
+                          {isImage && (
+                            <div style={{ marginBottom: '6px', borderRadius: '8px', overflow: 'hidden', maxWidth: '100%' }}>
+                              <img src={formatMediaUrl(msg.mediaUrl || msg.url || msg.image)} alt="Mídia" style={{ width: '100%', maxHeight: '240px', objectFit: 'cover', display: 'block' }} />
                             </div>
+                          )}
+
+                          {isAudio ? (
+                            <AudioMessagePlayer src={audioSrc} isSent={isMe} />
                           ) : (
-                            <div>{msg.text || msg.body || msg.content}</div>
+                            rawText && !isImage && <div>{rawText}</div>
+                          )}
+
+                          {isAudio && rawText && 
+                           !rawText.startsWith('data:') && 
+                           !rawText.startsWith('http') && 
+                           !rawText.includes('uploads/') && 
+                           !rawText.match(/\.(wav|mp3|ogg|opus|m4a)($|\?)/i) &&
+                           rawText !== '🎤 Áudio' && 
+                           !rawText.startsWith('🎤 Áudio:') &&
+                           rawText !== '[Áudio]' && 
+                           rawText !== '[audio]' && (
+                            <div style={{ fontSize: '0.78rem', marginTop: '4px', opacity: 0.85 }}>{rawText}</div>
                           )}
 
                           <div style={{
@@ -1642,7 +1737,11 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                             textAlign: 'right',
                             marginTop: '3px'
                           }}>
-                            {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                            {msg.timestamp ? (
+                              typeof msg.timestamp === 'number' && msg.timestamp > 10000000000
+                                ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            ) : ''}
                             {isMe && ' ✓✓'}
                           </div>
                         </div>
@@ -1719,24 +1818,9 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                     📅
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={startAudioRecording}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      fontSize: '1.2rem',
-                      cursor: 'pointer',
-                      padding: '4px'
-                    }}
-                    title="Gravar Áudio"
-                  >
-                    🎙️
-                  </button>
-
                   <input
                     type="text"
-                    placeholder="Mensagem para o cliente..."
+                    placeholder="Mensagem..."
                     value={chatInputText}
                     onChange={(e) => setChatInputText(e.target.value)}
                     style={{
@@ -1751,11 +1835,19 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                     }}
                   />
 
+                  {/* Botão único dinâmico igual ao WhatsApp: Seta para enviar texto / Microfone para gravar áudio */}
                   <button
-                    type="submit"
-                    disabled={!chatInputText.trim() || isSendingMsg}
+                    type="button"
+                    onClick={(e) => {
+                      if (chatInputText.trim()) {
+                        handleSendChatMessage(e);
+                      } else {
+                        startAudioRecording();
+                      }
+                    }}
+                    disabled={isSendingMsg}
                     style={{
-                      background: chatInputText.trim() ? '#00a884' : 'transparent',
+                      background: '#00a884',
                       border: 'none',
                       borderRadius: '50%',
                       width: '38px',
@@ -1763,12 +1855,24 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: chatInputText.trim() ? '#fff' : '#8696a0',
+                      color: '#fff',
                       fontSize: '1rem',
-                      cursor: chatInputText.trim() ? 'pointer' : 'default'
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
                     }}
+                    title={chatInputText.trim() ? "Enviar mensagem" : "Gravar áudio"}
                   >
-                    ➔
+                    {chatInputText.trim() ? (
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 1v10M19 10v1a7 7 0 0 1-14 0v-1M12 18v5M8 23h8"/>
+                        <rect x="9" y="5" width="6" height="8" rx="3" ry="3"/>
+                      </svg>
+                    )}
                   </button>
                 </form>
               )}

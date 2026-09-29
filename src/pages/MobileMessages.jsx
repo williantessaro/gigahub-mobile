@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import AudioMessagePlayer, { getAudioSource, isAudioMessage, formatMediaUrl } from '../components/AudioMessagePlayer';
+import { AudioRecorder } from '../utils/audioRecorder';
 
 const PREDEFINED_COLORS = [
   '#00a884', // Verde WhatsApp
@@ -10,139 +12,6 @@ const PREDEFINED_COLORS = [
   '#8b5cf6', // Roxo
   '#64748b'  // Cinza
 ];
-
-function AudioMessagePlayer({ src, isSent }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const audioRef = useRef(null);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const onLoadedMetadata = () => {
-      if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
-        setDuration(audio.duration);
-      }
-    };
-    const onTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
-    };
-    const onEnded = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
-    };
-
-    audio.addEventListener('loadedmetadata', onLoadedMetadata);
-    audio.addEventListener('timeupdate', onTimeUpdate);
-    audio.addEventListener('ended', onEnded);
-
-    return () => {
-      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
-      audio.removeEventListener('timeupdate', onTimeUpdate);
-      audio.removeEventListener('ended', onEnded);
-    };
-  }, [src]);
-
-  const togglePlay = (e) => {
-    if (e) {
-      e.stopPropagation();
-      e.preventDefault();
-    }
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      audioRef.current.play().then(() => setIsPlaying(true)).catch(err => {
-        console.warn('Erro ao reproduzir áudio:', err);
-      });
-    }
-  };
-
-  const handleSeek = (e) => {
-    e.stopPropagation();
-    const newTime = parseFloat(e.target.value);
-    setCurrentTime(newTime);
-    if (audioRef.current) {
-      audioRef.current.currentTime = newTime;
-    }
-  };
-
-  const formatTime = (secs) => {
-    if (!secs || isNaN(secs) || !isFinite(secs)) return '0:00';
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
-  return (
-    <div className="wa-audio-player" style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: '10px',
-      padding: '4px 0',
-      minWidth: '200px',
-      maxWidth: '280px'
-    }}>
-      <audio ref={audioRef} src={src} preload="metadata" />
-      
-      <button
-        type="button"
-        onClick={togglePlay}
-        style={{
-          width: '38px',
-          height: '38px',
-          borderRadius: '50%',
-          background: '#00a884',
-          border: 'none',
-          color: '#ffffff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          flexShrink: 0,
-          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-        }}
-      >
-        {isPlaying ? (
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-            <rect x="6" y="4" width="4" height="16" rx="1"></rect>
-            <rect x="14" y="4" width="4" height="16" rx="1"></rect>
-          </svg>
-        ) : (
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style={{ marginLeft: '2px' }}>
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-          </svg>
-        )}
-      </button>
-
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        <input
-          type="range"
-          min="0"
-          max={duration || 100}
-          step="0.1"
-          value={currentTime}
-          onChange={handleSeek}
-          style={{
-            width: '100%',
-            height: '4px',
-            accentColor: '#00a884',
-            cursor: 'pointer'
-          }}
-        />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: isSent ? '#d1d7db' : '#8696a0' }}>
-          <span>{formatTime(currentTime)}</span>
-          <span>{duration > 0 ? formatTime(duration) : 'Áudio'}</span>
-        </div>
-      </div>
-      
-      <span style={{ fontSize: '1.1rem', opacity: 0.8 }}>🎤</span>
-    </div>
-  );
-}
 
 const MobileMessages = ({ openTagsTrigger, user }) => {
   const currentUser = user || JSON.parse(localStorage.getItem('crm-user') || 'null');
@@ -188,6 +57,7 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef(null);
+  const wavRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const audioStreamRef = useRef(null);
   const recordingTimerRef = useRef(null);
@@ -364,10 +234,21 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
         });
         if (res.ok) {
           const dbMessages = await res.json();
-          setHistory(dbMessages.map(msg => ({
-            ...msg,
-            time: msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
-          })));
+          if (Array.isArray(dbMessages)) {
+            const seenKeys = new Set();
+            const uniqueMsgs = [];
+            for (const msg of dbMessages) {
+              const uniqueKey = msg.id || msg.key?.id || `${msg.timestamp || ''}_${msg.sender || ''}_${msg.text || msg.mediaUrl || ''}`;
+              if (!seenKeys.has(uniqueKey)) {
+                seenKeys.add(uniqueKey);
+                uniqueMsgs.push({
+                  ...msg,
+                  time: msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+                });
+              }
+            }
+            setHistory(uniqueMsgs);
+          }
         }
       } catch (error) {
         console.error("Error loading history", error);
@@ -394,31 +275,13 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
     }
   };
 
-  // Iniciar Gravação de Áudio (Toque Único)
+  // Iniciar Gravação de Áudio PCM WAV (Duração 100% Exata)
   const startRecording = async () => {
-    if (!selectedClient) return;
+    if (!selectedClient || isRecording) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
-
-      let options = {};
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) options = { mimeType: 'audio/webm;codecs=opus' };
-      else if (MediaRecorder.isTypeSupported('audio/webm')) options = { mimeType: 'audio/webm' };
-      else if (MediaRecorder.isTypeSupported('audio/mp4')) options = { mimeType: 'audio/mp4' };
-      else if (MediaRecorder.isTypeSupported('audio/ogg')) options = { mimeType: 'audio/ogg' };
-      else if (MediaRecorder.isTypeSupported('audio/wav')) options = { mimeType: 'audio/wav' };
-
-      const recorder = new MediaRecorder(stream, options);
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
-        }
-      };
-
-      mediaRecorderRef.current = recorder;
-      recorder.start(100);
+      const recorder = new AudioRecorder();
+      wavRecorderRef.current = recorder;
+      await recorder.start();
 
       setIsRecording(true);
       setRecordingSeconds(0);
@@ -429,7 +292,6 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
     } catch (err) {
       console.error('Erro ao acessar microfone:', err);
       alert('Permissão de microfone negada ou erro ao iniciar gravação.');
-      stopAudioStream();
       setIsRecording(false);
     }
   };
@@ -437,31 +299,26 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
   // Cancelar Gravação de Áudio
   const cancelRecording = () => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.ondataavailable = null;
-      mediaRecorderRef.current.stop();
+    if (wavRecorderRef.current) {
+      wavRecorderRef.current.cancel();
+      wavRecorderRef.current = null;
     }
-    stopAudioStream();
     setIsRecording(false);
     setRecordingSeconds(0);
-    audioChunksRef.current = [];
   };
 
   // Parar e Enviar Áudio Gravado
-  const stopAndSendRecording = () => {
-    if (!mediaRecorderRef.current || !isRecording || !selectedClient) return;
-
+  const stopAndSendRecording = async () => {
+    if (!wavRecorderRef.current || !isRecording || !selectedClient) return;
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-    const recorder = mediaRecorderRef.current;
 
-    recorder.onstop = async () => {
-      stopAudioStream();
-      const mimeType = recorder.mimeType || 'audio/webm';
-      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+    try {
+      const audioBlob = await wavRecorderRef.current.stop();
+      wavRecorderRef.current = null;
+      setIsRecording(false);
+      setRecordingSeconds(0);
 
-      if (audioBlob.size < 200) {
-        setIsRecording(false);
-        setRecordingSeconds(0);
+      if (!audioBlob || audioBlob.size < 500) {
         return;
       }
 
@@ -473,7 +330,10 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
           id: now.toString(),
           text: '🎤 Áudio',
           mediaUrl: audioBase64,
+          audioUrl: audioBase64,
+          audio: audioBase64,
           mediaType: 'audio',
+          type: 'ptt',
           sender: 'me',
           time: new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           status: 'sending',
@@ -493,6 +353,7 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
               remoteJid: selectedClient.id,
               type: 'ptt',
               mediaUrl: audioBase64,
+              audio: audioBase64,
               channel_id: selectedClient.channel_id,
               nome: selectedClient.name
             })
@@ -502,19 +363,20 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
         }
       };
       reader.readAsDataURL(audioBlob);
-
+    } catch (err) {
+      console.error('Erro ao finalizar gravação de áudio:', err);
       setIsRecording(false);
       setRecordingSeconds(0);
-      audioChunksRef.current = [];
-    };
-
-    recorder.stop();
+    }
   };
 
   // Enviar Mensagem
   const handleSend = async (e) => {
-    if (e) e.preventDefault();
-    if (!message.trim() || !selectedClient) return;
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!message.trim() || !selectedClient || isRecording) return;
 
     const now = Date.now();
     const msgText = message;
@@ -533,20 +395,36 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
 
     try {
       const token = localStorage.getItem('crm-token');
-      await fetch('/backend/api/messages/send', {
+      const payload = {
+        remoteJid: selectedClient.id,
+        text: msgText,
+        message: msgText,
+        body: msgText,
+        content: msgText,
+        sender: 'me',
+        timestamp: now,
+        nome: selectedClient.name
+      };
+
+      let res = await fetch('/backend/api/messages/send', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          remoteJid: selectedClient.id,
-          text: msgText,
-          sender: 'me',
-          timestamp: now,
-          nome: selectedClient.name
-        })
+        body: JSON.stringify(payload)
       });
+
+      if (!res.ok) {
+        res = await fetch(`/backend/api/chats/${selectedClient.id}/messages`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+      }
     } catch (e) {
       console.error('Send error:', e);
     }
@@ -876,24 +754,43 @@ const MobileMessages = ({ openTagsTrigger, user }) => {
         {/* Fundo do Chat contendo os balões de conversa */}
         <div ref={scrollRef} className="wa-chat-container">
           {history.map((msg, i) => {
-            const isAudio = msg.mediaType === 'audio' || msg.mediaType === 'ptt' || (msg.mediaUrl && (msg.mediaUrl.startsWith('data:audio') || msg.mediaUrl.match(/\.(mp3|ogg|opus|wav|m4a|webm|aac)($|\?)/i))) || msg.audioUrl;
+            const audioSrc = getAudioSource(msg);
+            const isAudio = isAudioMessage(msg, audioSrc);
             const isImage = msg.mediaType === 'image' || (msg.mediaUrl && (msg.mediaUrl.startsWith('data:image') || msg.mediaUrl.match(/\.(jpeg|jpg|png|webp|gif)($|\?)/i)));
-            const isSent = msg.sender === 'me';
-            const audioSrc = msg.mediaUrl || msg.audioUrl;
+            const isSent = Boolean(
+              msg.sender === 'me' || 
+              msg.sender === 'agent' ||
+              msg.sender === 'operator' ||
+              msg.sender === 'system' ||
+              msg.fromMe === true || 
+              msg.fromMe === 1 || 
+              msg.fromMe === 'true' || 
+              msg.key?.fromMe === true || 
+              msg.direction === 'out' || 
+              msg.direction === 'outgoing'
+            );
 
             return (
               <div key={i} className={`wa-bubble ${isSent ? 'sent' : 'received'}`}>
                 {isImage && (
                   <div style={{ marginBottom: '6px', borderRadius: '8px', overflow: 'hidden', maxWidth: '100%' }}>
-                    <img src={msg.mediaUrl} alt="Mídia" style={{ width: '100%', maxHeight: '240px', objectFit: 'cover', display: 'block' }} />
+                    <img src={formatMediaUrl(msg.mediaUrl || msg.url)} alt="Mídia" style={{ width: '100%', maxHeight: '240px', objectFit: 'cover', display: 'block' }} />
                   </div>
                 )}
-                {isAudio && audioSrc ? (
+                {isAudio ? (
                   <AudioMessagePlayer src={audioSrc} isSent={isSent} />
                 ) : (
                   msg.text && <div>{msg.text}</div>
                 )}
-                {isAudio && msg.text && msg.text !== '🎤 Áudio' && !msg.text.startsWith('🎤 Áudio:') && (
+                {isAudio && msg.text && 
+                 !msg.text.startsWith('data:') && 
+                 !msg.text.startsWith('http') && 
+                 !msg.text.includes('uploads/') && 
+                 !msg.text.match(/\.(wav|mp3|ogg|opus|m4a)($|\?)/i) &&
+                 msg.text !== '🎤 Áudio' && 
+                 !msg.text.startsWith('🎤 Áudio:') && 
+                 msg.text !== '[Áudio]' && 
+                 msg.text !== '[audio]' && (
                   <div style={{ fontSize: '0.85rem', marginTop: '4px', opacity: 0.9 }}>{msg.text}</div>
                 )}
                 <div className="wa-bubble-meta">

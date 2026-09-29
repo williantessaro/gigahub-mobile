@@ -41,6 +41,14 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
       icon: '🏢',
       iconColor: '#ff8800',
       status: 'Ativo'
+    },
+    {
+      id: 'consorcios',
+      name: 'Gestor Consórcios',
+      description: 'Gestão completa de cotas, lances, contemplações e grupos.',
+      icon: '🤝',
+      iconColor: '#10b981',
+      status: 'Ativo'
     }
   ];
 
@@ -477,7 +485,8 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
                       {[
                         { id: 'gigamente', label: '🧠 GigaMente' },
                         { id: 'gigacrm', label: '🎯 Giga CRM' },
-                        { id: 'predios', label: '🏢 Gestor Prédios' }
+                        { id: 'predios', label: '🏢 Gestor Prédios' },
+                        { id: 'consorcios', label: '🤝 Gestor Consórcios' }
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -552,6 +561,7 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
                                 if (norm === 'gigamente') return 'GigaMente';
                                 if (norm === 'gigacrm') return 'Giga CRM';
                                 if (norm === 'predios') return 'Gestor Prédios';
+                                if (norm === 'consorcios') return 'Gestor Consórcios';
                                 return norm;
                               }).join(', ')
                             : 'Todos'}

@@ -4,10 +4,12 @@ import MobileLayout from './components/MobileLayout';
 import MobilePortal from './pages/MobilePortal';
 import MobileKanban from './pages/MobileKanban';
 import MobilePredios from './pages/MobilePredios';
+import MobileConsorcios from './pages/MobileConsorcios';
 import MobileMessages from './pages/MobileMessages';
 import MobileClients from './pages/MobileClients';
 import MobileGigaMente from './pages/MobileGigaMente';
 import MobileLogin from './pages/MobileLogin';
+import { biometricService } from './services/biometricService';
 
 // Mapeia o pathname atual para a página correspondente
 const getPageFromPath = (path) => {
@@ -27,6 +29,9 @@ const getPageFromPath = (path) => {
   if (cleanPath.endsWith('/predios')) {
     return 'predios';
   }
+  if (cleanPath.endsWith('/consorcios')) {
+    return 'consorcios';
+  }
   return 'portal';
 };
 
@@ -45,6 +50,8 @@ const getPathFromPage = (page) => {
       return '/mobile/gigamente';
     case 'predios':
       return '/mobile/predios';
+    case 'consorcios':
+      return '/mobile/consorcios';
     case 'portal':
     default:
       return '/mobile';
@@ -85,13 +92,10 @@ function App() {
     try {
       CapApp.addListener('backButton', () => {
         if (isChildModalActiveRef.current) {
-          // Se houver modal ou chat do lead aberto, fecha o modal primeiro
           setIsChildModalActive(false);
         } else if (currentPageRef.current !== 'portal') {
-          // Se estiver em uma tela secundária (Meu CRM, GigaMente, etc.), volta para o Portal
           navigateTo('portal');
         } else {
-          // Se estiver na tela inicial do Portal, minimiza/sai do app
           CapApp.exitApp();
         }
       }).then(handle => {
@@ -101,7 +105,6 @@ function App() {
       console.warn('Capacitor App BackButton listener não disponível:', err);
     }
 
-    // Escuta o botão voltar/avançar padrão da History API (popstate)
     const handlePopState = () => {
       const page = getPageFromPath(window.location.pathname);
       setCurrentPage(page);
@@ -117,41 +120,83 @@ function App() {
     };
   }, []);
 
+  // Autenticação Resiliente e Auto-Relogin com credenciais salvas
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    let token = urlParams.get('token');
+    async function checkSession() {
+      const urlParams = new URLSearchParams(window.location.search);
+      let token = urlParams.get('token');
 
-    if (!token) {
-      token = localStorage.getItem('crm-token') || localStorage.getItem('portal_token') || localStorage.getItem('token');
-    }
+      if (!token) {
+        token = localStorage.getItem('crm-token') || localStorage.getItem('portal_token') || localStorage.getItem('token');
+      }
 
-    if (!token) {
-      setChecking(false);
-      return;
-    }
+      // 1. Se existir token, tentar validar no servidor
+      if (token) {
+        localStorage.setItem('crm-token', token);
+        try {
+          const res = await fetch('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
 
-    localStorage.setItem('crm-token', token);
-
-    fetch('/api/auth/me', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data && data.user) {
-          setUser(data.user);
-          localStorage.setItem('crm-user', JSON.stringify(data.user));
-        } else {
-          localStorage.removeItem('crm-token');
-          localStorage.removeItem('crm-user');
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.user) {
+              setUser(data.user);
+              localStorage.setItem('crm-user', JSON.stringify(data.user));
+              setChecking(false);
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('Servidor indisponível ou offline. Usando cache local:', err);
+          const cachedUser = localStorage.getItem('crm-user');
+          if (cachedUser) {
+            try {
+              setUser(JSON.parse(cachedUser));
+              setChecking(false);
+              return;
+            } catch (e) {}
+          }
         }
-      })
-      .catch(() => {
-        localStorage.removeItem('crm-token');
-        localStorage.removeItem('crm-user');
-      })
-      .finally(() => {
-        setChecking(false);
-      });
+      }
+
+      // 2. Se o token expirou ou não for válido, tentar auto-login silencioso com credenciais salvas (Lembrar Senha)
+      try {
+        const creds = await biometricService.getSavedCredentials();
+        if (creds.email && creds.password && creds.rememberPassword) {
+          const loginRes = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: creds.email, password: creds.password, recaptchaToken: 'localhost-bypass' })
+          });
+
+          if (loginRes.ok) {
+            const loginData = await loginRes.json();
+            if (loginData && loginData.token) {
+              localStorage.setItem('crm-token', loginData.token);
+              localStorage.setItem('crm-user', JSON.stringify(loginData.user));
+              setUser(loginData.user);
+              setChecking(false);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Tentativa de auto-login silencioso falhou:', err);
+      }
+
+      // 3. Se nenhuma tentativa funcionar, carregar dados em cache se existirem para não travar
+      const cachedUser = localStorage.getItem('crm-user');
+      if (cachedUser) {
+        try {
+          setUser(JSON.parse(cachedUser));
+        } catch (e) {}
+      }
+
+      setChecking(false);
+    }
+
+    checkSession();
   }, []);
 
   const handleLogin = (userData) => {
@@ -163,6 +208,7 @@ function App() {
   const handleLogout = () => {
     localStorage.removeItem('crm-token');
     localStorage.removeItem('crm-user');
+    biometricService.clearCredentials();
     setUser(null);
     setCurrentPage('portal');
   };
@@ -202,6 +248,10 @@ function App() {
 
   if (currentPage === 'predios') {
     return <MobilePredios onNavigate={navigateTo} />;
+  }
+
+  if (currentPage === 'consorcios') {
+    return <MobileConsorcios onNavigate={navigateTo} />;
   }
 
   // Telas do CRM clássico (Conversas e Clientes)
