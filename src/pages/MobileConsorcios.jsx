@@ -10,16 +10,6 @@ const CATEGORY_MAP = {
   OTHER: 'Outros'
 };
 
-const CATEGORY_REVERSE_MAP = {
-  'Imobiliário': 'PROPERTY',
-  'Automotivo': 'VEHICLE',
-  'Veículos Pesados': 'TRUCK',
-  'Motocicleta': 'MOTORCYCLE',
-  'Equipamentos': 'EQUIPMENT',
-  'Serviços': 'SERVICE',
-  'Outros': 'OTHER'
-};
-
 const STATUS_MAP = {
   ACTIVE: 'Ativa',
   CONTEMPLATED: 'Contemplada',
@@ -30,12 +20,13 @@ const STATUS_MAP = {
 
 export default function MobileConsorcios({ onNavigate }) {
   const [cards, setCards] = useState([]);
+  const [installmentsMap, setInstallmentsMap] = useState({}); // cardId -> array of installments
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('cotas'); // 'cotas', 'contemplados', 'grupos'
+  const [activeTab, setActiveTab] = useState('cotas'); // 'cotas', 'contemplados'
 
-  // Estado para Modal de Inserção / Edição
+  // Estado para Modal de Inserção / Edição de Carta
   const [showModal, setShowModal] = useState(false);
   const [editingCardId, setEditingCardId] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -44,12 +35,23 @@ export default function MobileConsorcios({ onNavigate }) {
     group_number: '',
     quota_number: '',
     card_number: '',
+    due_day: '10',
     category: 'PROPERTY',
     current_credit: '',
     current_installment: '',
-    total_installments: '',
-    paid_installments: '',
+    total_installments: '180',
+    paid_installments: '0',
     status: 'ACTIVE',
+    notes: ''
+  });
+
+  // Estado para Modal de Baixa de Parcela Mensal (Check ✅)
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentCard, setPaymentCard] = useState(null);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentFormData, setPaymentFormData] = useState({
+    paid_amount: '',
+    paid_date: new Date().toISOString().split('T')[0],
     notes: ''
   });
 
@@ -70,7 +72,23 @@ export default function MobileConsorcios({ onNavigate }) {
       });
       if (res.ok) {
         const data = await res.json();
-        setCards(Array.isArray(data) ? data : []);
+        const cardList = Array.isArray(data) ? data : [];
+        setCards(cardList);
+
+        // Busca parcelas de cada carta para verificar pagamentos do mês atual
+        const map = {};
+        for (const card of cardList) {
+          try {
+            const pRes = await fetch(`/backend/api/consorcios/cartas/${card.id}/parcelas`, { headers: getAuthHeaders() });
+            if (pRes.ok) {
+              const pData = await pRes.json();
+              map[card.id] = Array.isArray(pData) ? pData : [];
+            }
+          } catch (e) {
+            map[card.id] = [];
+          }
+        }
+        setInstallmentsMap(map);
       } else {
         const errData = await res.json().catch(() => ({}));
         setError(errData.error || 'Erro ao carregar consórcios do servidor.');
@@ -94,6 +112,7 @@ export default function MobileConsorcios({ onNavigate }) {
       group_number: '',
       quota_number: '',
       card_number: `CARTA-${Date.now().toString().slice(-6)}`,
+      due_day: '10',
       category: 'PROPERTY',
       current_credit: '',
       current_installment: '',
@@ -112,6 +131,7 @@ export default function MobileConsorcios({ onNavigate }) {
       group_number: card.group_number || card.group_code || '',
       quota_number: card.quota_number || '',
       card_number: card.card_number || '',
+      due_day: String(card.due_day || 10),
       category: card.category || 'PROPERTY',
       current_credit: card.current_credit || card.original_credit || '',
       current_installment: card.current_installment || card.original_installment || '',
@@ -155,6 +175,7 @@ export default function MobileConsorcios({ onNavigate }) {
         card_number: formData.card_number || `CARTA-${Date.now().toString().slice(-6)}`,
         quota_number: formData.quota_number,
         group_number: formData.group_number,
+        due_day: Number(formData.due_day || 10),
         category: formData.category,
         original_credit: Number(formData.current_credit || 0),
         current_credit: Number(formData.current_credit || 0),
@@ -189,6 +210,89 @@ export default function MobileConsorcios({ onNavigate }) {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Abrir Modal de Pagamento de Parcela (Check ✅)
+  const handleOpenPaymentModal = (card) => {
+    setPaymentCard(card);
+    setPaymentFormData({
+      paid_amount: String(card.current_installment || card.original_installment || ''),
+      paid_date: new Date().toISOString().split('T')[0],
+      notes: `Pagamento de parcela referente a ${new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`
+    });
+    setShowPaymentModal(true);
+  };
+
+  // Confirmar Pagamento da Parcela
+  const handleConfirmPayment = async (e) => {
+    e.preventDefault();
+    if (!paymentCard) return;
+
+    const paidVal = Number(paymentFormData.paid_amount || 0);
+    if (paidVal <= 0) {
+      alert('Por favor, informe um valor de parcela válido.');
+      return;
+    }
+
+    setIsProcessingPayment(true);
+    try {
+      const nextParcelNum = (paymentCard.paid_installments || 0) + 1;
+
+      // 1. Criar registro de parcela em consortium_installments
+      const instPayload = {
+        installment_number: nextParcelNum,
+        due_date: paymentFormData.paid_date,
+        paid_date: paymentFormData.paid_date,
+        paid_amount: paidVal,
+        base_amount: paidVal,
+        total_due: paidVal,
+        payment_status: 'PAID',
+        notes: paymentFormData.notes
+      };
+
+      const pRes = await fetch(`/backend/api/consorcios/cartas/${paymentCard.id}/parcelas`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(instPayload)
+      });
+
+      if (!pRes.ok) {
+        const pErr = await pRes.json().catch(() => ({}));
+        alert(pErr.error || 'Erro ao registrar parcela.');
+        return;
+      }
+
+      // 2. Atualizar a carta: incrementar paid_installments (+1) e atualizar a parcela atual
+      const cardPayload = {
+        paid_installments: nextParcelNum,
+        current_installment: paidVal
+      };
+
+      const cRes = await fetch(`/backend/api/consorcios/cartas/${paymentCard.id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(cardPayload)
+      });
+
+      if (cRes.ok) {
+        setShowPaymentModal(false);
+        fetchCards();
+      } else {
+        const cErr = await cRes.json().catch(() => ({}));
+        alert(cErr.error || 'Erro ao atualizar dados do consórcio após pagamento.');
+      }
+    } catch (err) {
+      alert('Erro de conexão ao processar baixa de parcela.');
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  // Verifica se o consórcio já teve pagamento no mês atual
+  const checkIfPaidCurrentMonth = (cardId) => {
+    const list = installmentsMap[cardId] || [];
+    const currentYearMonth = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+    return list.some(p => (p.paid_date || p.due_date || '').startsWith(currentYearMonth) && p.payment_status === 'PAID');
   };
 
   const filtered = cards.filter(c => {
@@ -253,7 +357,7 @@ export default function MobileConsorcios({ onNavigate }) {
           </button>
           <div>
             <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '700', color: '#fff' }}>Gestor Consórcios</h2>
-            <p style={{ margin: 0, fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Base Real de Cotas & Grupos</p>
+            <p style={{ margin: 0, fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Vencimentos & Baixa de Parcelas</p>
           </div>
         </div>
 
@@ -366,7 +470,7 @@ export default function MobileConsorcios({ onNavigate }) {
           Carregando consórcios da base real...
         </div>
       ) : (
-        /* Lista de Consórcios Reais */
+        /* Lista de Consórcios Reais com Controle de Vencimento e Check */
         <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
           {filtered.length === 0 ? (
             <div style={{ padding: '30px', textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: '0.9rem' }}>
@@ -378,6 +482,8 @@ export default function MobileConsorcios({ onNavigate }) {
               const categoryLabel = CATEGORY_MAP[c.category] || c.category || 'Geral';
               const groupCode = c.group_number || c.group_code || 'G-GERAL';
               const quotaNum = c.quota_number || c.card_number;
+              const dueDay = c.due_day || 10;
+              const isPaid = checkIfPaidCurrentMonth(c.id);
 
               return (
                 <div
@@ -394,12 +500,15 @@ export default function MobileConsorcios({ onNavigate }) {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <span style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: '700' }}>
                           Grupo {groupCode} {quotaNum ? `• Cota ${quotaNum}` : ''}
                         </span>
                         <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.08)', padding: '2px 6px', borderRadius: '4px' }}>
                           {categoryLabel}
+                        </span>
+                        <span style={{ fontSize: '0.7rem', color: '#fbbf24', background: 'rgba(251, 191, 36, 0.12)', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' }}>
+                          📍 Vence todo dia {dueDay}
                         </span>
                       </div>
                       <h3 style={{ margin: '4px 0 0 0', fontSize: '1.05rem', fontWeight: '700', color: '#fff' }}>
@@ -449,17 +558,54 @@ export default function MobileConsorcios({ onNavigate }) {
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Parcela</div>
+                      <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Parcela Mensal</div>
                       <div style={{ fontSize: '0.85rem', fontWeight: '700', color: '#fff' }}>
                         {formatMoney(c.current_installment || c.original_installment)}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Parcelas</div>
+                      <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Parcelas Pagas</div>
                       <div style={{ fontSize: '0.85rem', fontWeight: '700', color: '#60a5fa' }}>
                         {c.paid_installments || 0}/{c.total_installments || 0}
                       </div>
                     </div>
+                  </div>
+
+                  {/* Barra de Status de Pagamento do Mês Atual (Com Botão de Check ✅) */}
+                  <div style={{
+                    marginTop: '4px',
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    background: isPaid ? 'rgba(52, 211, 153, 0.12)' : 'rgba(255, 102, 0, 0.12)',
+                    border: isPaid ? '1px solid rgba(52, 211, 153, 0.25)' : '1px solid rgba(255, 102, 0, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '0.82rem', fontWeight: '700', color: isPaid ? '#34d399' : '#ff8800' }}>
+                        {isPaid ? '✅ PAGO NESTE MÊS' : `⏳ Vence dia ${dueDay}`}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => handleOpenPaymentModal(c)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: isPaid ? 'rgba(255, 255, 255, 0.1)' : '#10b981',
+                        color: '#fff',
+                        fontWeight: '700',
+                        fontSize: '0.78rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {isPaid ? '✅ Baixar Nova Parcela' : '✅ Baixar Parcela do Mês'}
+                    </button>
                   </div>
                 </div>
               );
@@ -468,7 +614,7 @@ export default function MobileConsorcios({ onNavigate }) {
         </div>
       )}
 
-      {/* Modal de Inserção e Edição */}
+      {/* Modal de Inserção e Edição de Consórcio */}
       {showModal && (
         <div style={{
           position: 'fixed',
@@ -538,21 +684,36 @@ export default function MobileConsorcios({ onNavigate }) {
                 </div>
               </div>
 
-              <div>
-                <label style={labelStyle}>Categoria</label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  style={inputStyle}
-                >
-                  <option value="PROPERTY">Imobiliário</option>
-                  <option value="VEHICLE">Automotivo</option>
-                  <option value="TRUCK">Veículos Pesados</option>
-                  <option value="MOTORCYCLE">Motocicleta</option>
-                  <option value="EQUIPMENT">Equipamentos</option>
-                  <option value="SERVICE">Serviços</option>
-                  <option value="OTHER">Outros</option>
-                </select>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Dia Vencimento no Mês</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    placeholder="Ex: 10"
+                    value={formData.due_day}
+                    onChange={(e) => setFormData({ ...formData, due_day: e.target.value })}
+                    style={inputStyle}
+                    required
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Categoria</label>
+                  <select
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    style={inputStyle}
+                  >
+                    <option value="PROPERTY">Imobiliário</option>
+                    <option value="VEHICLE">Automotivo</option>
+                    <option value="TRUCK">Veículos Pesados</option>
+                    <option value="MOTORCYCLE">Motocicleta</option>
+                    <option value="EQUIPMENT">Equipamentos</option>
+                    <option value="SERVICE">Serviços</option>
+                    <option value="OTHER">Outros</option>
+                  </select>
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '10px' }}>
@@ -647,6 +808,113 @@ export default function MobileConsorcios({ onNavigate }) {
                 }}
               >
                 {isSaving ? 'Salvando no Banco Real...' : 'Salvar no Banco de Dados'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Baixa / Confirmação de Pagamento de Parcela (Check ✅) */}
+      {showPaymentModal && paymentCard && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#161b22',
+            border: '1px solid rgba(52, 211, 153, 0.3)',
+            borderRadius: '16px',
+            width: '100%',
+            maxWidth: '420px',
+            padding: '20px',
+            boxSizing: 'border-box'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700', color: '#fff' }}>
+                  ✅ Dar Baixa em Parcela
+                </h3>
+                <p style={{ margin: '2px 0 0 0', fontSize: '0.78rem', color: '#10b981' }}>
+                  {paymentCard.administrator_name} - Grupo {paymentCard.group_number || paymentCard.group_code} • Cota {paymentCard.quota_number || paymentCard.card_number}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowPaymentModal(false)}
+                style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)', fontSize: '1.2rem', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmPayment} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={labelStyle}>Valor Pago na Parcela (R$) - Ajustável caso haja Reajuste</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Ex: 1850.00"
+                  value={paymentFormData.paid_amount}
+                  onChange={(e) => setPaymentFormData({ ...paymentFormData, paid_amount: e.target.value })}
+                  style={{ ...inputStyle, borderColor: '#10b981', fontSize: '1rem', fontWeight: '700', color: '#34d399' }}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Data do Pagamento</label>
+                <input
+                  type="date"
+                  value={paymentFormData.paid_date}
+                  onChange={(e) => setPaymentFormData({ ...paymentFormData, paid_date: e.target.value })}
+                  style={inputStyle}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Observação do Pagamento</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Pago via PIX no Banco Itaú..."
+                  value={paymentFormData.notes}
+                  onChange={(e) => setPaymentFormData({ ...paymentFormData, notes: e.target.value })}
+                  style={inputStyle}
+                />
+              </div>
+
+              <div style={{
+                padding: '10px',
+                borderRadius: '8px',
+                background: 'rgba(16, 185, 129, 0.1)',
+                fontSize: '0.78rem',
+                color: 'rgba(255,255,255,0.8)'
+              }}>
+                ℹ️ Ao confirmar, será contabilizada <strong>+1 parcela paga</strong> (passará para { (paymentCard.paid_installments || 0) + 1 } de { paymentCard.total_installments }) e o novo valor de parcela será atualizado.
+              </div>
+
+              <button
+                type="submit"
+                disabled={isProcessingPayment}
+                style={{
+                  marginTop: '6px',
+                  padding: '14px',
+                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  border: 'none',
+                  borderRadius: '10px',
+                  color: '#fff',
+                  fontWeight: '700',
+                  fontSize: '0.95rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.4)'
+                }}
+              >
+                {isProcessingPayment ? 'Registrando Pagamento...' : '✅ Confirmar Pagamento & Incrementar Parcela'}
               </button>
             </form>
           </div>
