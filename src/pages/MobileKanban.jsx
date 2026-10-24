@@ -25,7 +25,20 @@ const DEFAULT_POS_VENDAS_STAGES = [
   { id: 'Concluído', name: 'Concluído', color: '#16a34a', icon: 'check_circle' }
 ];
 
-export default function MobileKanban({ onNavigate, onModalStateChange }) {
+export default function MobileKanban({ onNavigate, onModalStateChange, user, onLogout }) {
+  // Estados de Gestão de Usuários (Admin)
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [usersList, setUsersList] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [adminError, setAdminError] = useState('');
+  const [adminSuccess, setAdminSuccess] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newRole, setNewRole] = useState('user');
+  const [newSystems, setNewSystems] = useState(['gigacrm']);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+
   // Funis dinâmicos
   const [availableFunnels, setAvailableFunnels] = useState(CANONICAL_FUNNELS);
   const [currentFunnelId, setCurrentFunnelId] = useState('VENDAS');
@@ -41,8 +54,42 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterUnread, setFilterUnread] = useState(false);
   const [transferringId, setTransferringId] = useState(null);
   const [draggedLead, setDraggedLead] = useState(null);
+
+  // Helper para verificar se um lead possui mensagens não lidas ou se foi marcado como não lido/não visualizado
+  const isLeadUnread = (lead) => {
+    if (!lead) return false;
+
+    // Contador numérico de mensagens não lidas
+    const count = Number(lead.unreadCount ?? lead.unread_count ?? lead.unread_messages ?? lead.msg_nao_lidas ?? 0);
+    if (count > 0) return true;
+
+    // Marcado manualmente ou flag de não lida/não visualizada
+    if (
+      lead.unread === true || lead.unread === 1 || lead.unread === 'true' || lead.unread === '1' ||
+      lead.nao_lida === true || lead.nao_lida === 1 || lead.nao_lida === 'true' || lead.nao_lida === '1' ||
+      lead.nao_lido === true || lead.nao_lido === 1 || lead.nao_lido === 'true' || lead.nao_lido === '1' ||
+      lead.naoLida === true || lead.naoLida === 1 || lead.naoLida === 'true' ||
+      lead.naoLido === true || lead.naoLido === 1 || lead.naoLido === 'true' ||
+      lead.is_unread === true || lead.is_unread === 1 || lead.has_unread === true || lead.has_unread === 1 ||
+      lead.hasUnread === true || lead.hasUnread === 1
+    ) {
+      return true;
+    }
+
+    if (
+      lead.status_leitura === 'nao_lida' || lead.status_leitura === 'nao_lido' || lead.status_leitura === 'unread' ||
+      lead.visualizado === false || lead.visualizado === 0 || lead.visualizado === 'false' || lead.visualizado === '0'
+    ) {
+      return true;
+    }
+
+    return false;
+  };
+
+  const unreadCountTotal = leads.filter(isLeadUnread).length;
 
   // Menu Rápido de Mover Etapa
   const [quickMoveLead, setQuickMoveLead] = useState(null);
@@ -211,12 +258,112 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     }
   };
 
+  // Funções de Gestão de Usuários (Admin)
+  const fetchUsers = async () => {
+    setLoadingUsers(true);
+    setAdminError('');
+    try {
+      const token = localStorage.getItem('portal_token') || localStorage.getItem('crm-token');
+      let res = await fetch('/api/users', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        res = await fetch('/api/admin/users', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      }
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data.users || []);
+        setUsersList(list);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setAdminError(errData.error || 'Não foi possível carregar os usuários.');
+      }
+    } catch (err) {
+      setAdminError('Erro de conexão ao carregar usuários.');
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const handleOpenAdmin = () => {
+    setShowAdminModal(true);
+    fetchUsers();
+  };
+
+  const handleToggleSystem = (sysId) => {
+    if (newSystems.includes(sysId)) {
+      setNewSystems(newSystems.filter(s => s !== sysId));
+    } else {
+      setNewSystems([...newSystems, sysId]);
+    }
+  };
+
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    if (!newEmail || !newPassword) return;
+    setIsCreatingUser(true);
+    setAdminError('');
+    setAdminSuccess('');
+
+    try {
+      const token = localStorage.getItem('portal_token') || localStorage.getItem('crm-token');
+      let res = await fetch('/api/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          email: newEmail,
+          password: newPassword,
+          name: newName,
+          role: newRole,
+          accessible_systems: newSystems
+        })
+      });
+
+      if (!res.ok) {
+        res = await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            email: newEmail,
+            password: newPassword,
+            name: newName,
+            role: newRole,
+            accessible_systems: newSystems
+          })
+        });
+      }
+
+      if (res.ok) {
+        setAdminSuccess('Usuário cadastrado com sucesso!');
+        setNewEmail('');
+        setNewPassword('');
+        setNewName('');
+        fetchUsers();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setAdminError(errData.error || 'Erro ao criar usuário');
+      }
+    } catch (err) {
+      setAdminError('Erro de conexão ao criar usuário');
+    } finally {
+      setIsCreatingUser(false);
+    }
+  };
+
   // Notifica o App se algum modal estiver aberto (para controle do botão Voltar nativo do Android)
   useEffect(() => {
     if (onModalStateChange) {
-      onModalStateChange(Boolean(activeModalLead || isScheduleOpen || quickMoveLead || isCreatingFunnel || isCreatingStage || isCreateLeadModalOpen));
+      onModalStateChange(Boolean(activeModalLead || isScheduleOpen || quickMoveLead || isCreatingFunnel || isCreatingStage || isCreateLeadModalOpen || showAdminModal));
     }
-  }, [activeModalLead, isScheduleOpen, quickMoveLead, isCreatingFunnel, isCreatingStage, isCreateLeadModalOpen, onModalStateChange]);
+  }, [activeModalLead, isScheduleOpen, quickMoveLead, isCreatingFunnel, isCreatingStage, isCreateLeadModalOpen, showAdminModal, onModalStateChange]);
 
   // Carregar lista de funis da API
   const loadFunnelsList = async () => {
@@ -317,6 +464,11 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
     const firstStage = stages[0]?.id;
 
     return leads.filter(l => {
+      // Filtro por Não Lidas
+      if (filterUnread && !isLeadUnread(l)) {
+        return false;
+      }
+
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
         const matchesName = (l.nome || '').toLowerCase().includes(term);
@@ -559,7 +711,51 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
 
   // Abertura do Modal de Detalhes Completo
   const openLeadModal = (lead) => {
-    setActiveModalLead(lead);
+    // Marcar como lida localmente
+    setLeads(prev => prev.map(l => l.id === lead.id ? {
+      ...l,
+      unreadCount: 0,
+      unread_count: 0,
+      unread_messages: 0,
+      msg_nao_lidas: 0,
+      unread: false,
+      nao_lida: false,
+      nao_lido: false,
+      naoLida: false,
+      naoLido: false,
+      is_unread: false,
+      has_unread: false,
+      hasUnread: false,
+      status_leitura: 'lida',
+      visualizado: true
+    } : l));
+
+    if (lead.whatsapp) {
+      const cleanPhone = String(lead.whatsapp).replace(/\D/g, '');
+      const jid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+      fetch(`/backend/api/chats/${jid}/read`, {
+        method: 'POST',
+        headers: getAuthHeaders()
+      }).catch(() => {});
+    }
+
+    setActiveModalLead({
+      ...lead,
+      unreadCount: 0,
+      unread_count: 0,
+      unread_messages: 0,
+      msg_nao_lidas: 0,
+      unread: false,
+      nao_lida: false,
+      nao_lido: false,
+      naoLida: false,
+      naoLido: false,
+      is_unread: false,
+      has_unread: false,
+      hasUnread: false,
+      status_leitura: 'lida',
+      visualizado: true
+    });
     setModalTab('chat');
     const descVal = lead.description || lead.descricao || lead.observacoes || lead.observacao || lead.categoria || lead.notes || '';
     setEditedLeadData({
@@ -576,6 +772,57 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
       notes: descVal,
       status: lead.status || lead.lista || stages[0]?.id
     });
+  };
+
+  // Alternar marcação manual de Não Lida / Lida
+  const handleToggleMarkUnread = (e, lead) => {
+    if (e) e.stopPropagation();
+    const currentlyUnread = isLeadUnread(lead);
+    const nextUnread = !currentlyUnread;
+
+    setLeads(prev => prev.map(l => l.id === lead.id ? {
+      ...l,
+      unread: nextUnread,
+      nao_lida: nextUnread,
+      nao_lido: nextUnread,
+      naoLida: nextUnread,
+      naoLido: nextUnread,
+      is_unread: nextUnread,
+      has_unread: nextUnread,
+      hasUnread: nextUnread,
+      status_leitura: nextUnread ? 'nao_lida' : 'lida',
+      visualizado: !nextUnread,
+      unreadCount: nextUnread ? 1 : 0,
+      unread_count: nextUnread ? 1 : 0
+    } : l));
+
+    if (activeModalLead && activeModalLead.id === lead.id) {
+      setActiveModalLead(prev => ({
+        ...prev,
+        unread: nextUnread,
+        nao_lida: nextUnread,
+        nao_lido: nextUnread,
+        naoLida: nextUnread,
+        naoLido: nextUnread,
+        is_unread: nextUnread,
+        has_unread: nextUnread,
+        hasUnread: nextUnread,
+        status_leitura: nextUnread ? 'nao_lida' : 'lida',
+        visualizado: !nextUnread,
+        unreadCount: nextUnread ? 1 : 0,
+        unread_count: nextUnread ? 1 : 0
+      }));
+    }
+
+    if (lead.whatsapp) {
+      const cleanPhone = String(lead.whatsapp).replace(/\D/g, '');
+      const jid = cleanPhone.includes('@') ? cleanPhone : `${cleanPhone}@s.whatsapp.net`;
+      const endpoint = nextUnread ? `/backend/api/chats/${jid}/unread` : `/backend/api/chats/${jid}/read`;
+      fetch(endpoint, {
+        method: 'POST',
+        headers: getAuthHeaders()
+      }).catch(() => {});
+    }
   };
 
   // Salvar Alterações dos Dados do Lead
@@ -948,28 +1195,10 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
         top: 0,
         zIndex: 100
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              onClick={() => onNavigate('portal')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                background: 'rgba(255, 255, 255, 0.08)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
-                color: '#38bdf8',
-                padding: '6px 10px',
-                borderRadius: '8px',
-                fontSize: '0.8rem',
-                fontWeight: '700',
-                cursor: 'pointer'
-              }}
-            >
-              ← Portal
-            </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <div>
-              <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', color: '#fff', letterSpacing: '-0.3px' }}>
+              <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', color: '#fff', letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>
                 Giga CRM <span style={{ color: '#ff6600', fontSize: '0.85rem' }}>• Kanban</span>
               </h1>
               <p style={{ margin: 0, fontSize: '0.70rem', color: 'rgba(255,255,255,0.55)' }}>
@@ -978,26 +1207,73 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
             </div>
           </div>
 
-          <button
-            onClick={() => loadData()}
-            disabled={loading}
-            style={{
-              background: 'rgba(56, 189, 248, 0.12)',
-              border: '1px solid rgba(56, 189, 248, 0.25)',
-              color: '#38bdf8',
-              padding: '6px 10px',
-              borderRadius: '8px',
-              fontSize: '0.78rem',
-              fontWeight: '700',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            <span>🔄</span>
-            <span>{loading ? '...' : 'Atualizar'}</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            <button
+              onClick={() => loadData()}
+              disabled={loading}
+              title="Atualizar Funil"
+              style={{
+                background: 'rgba(56, 189, 248, 0.12)',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+                color: '#38bdf8',
+                padding: '6px 9px',
+                borderRadius: '8px',
+                fontSize: '0.76rem',
+                fontWeight: '700',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              <span>🔄</span>
+              <span>{loading ? '...' : 'Atualizar'}</span>
+            </button>
+
+            {user?.role === 'admin' && (
+              <button
+                onClick={handleOpenAdmin}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.14)',
+                  color: '#fff',
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  fontSize: '0.76rem',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                <span>⚙️</span>
+                <span>Gestão</span>
+              </button>
+            )}
+
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  color: '#f87171',
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  fontSize: '0.76rem',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                <span>🚪</span>
+                <span>Sair</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* SELETOR DE FUNIS DINÂMICOS (VENDAS, PÓS-VENDAS, CUSTOM) */}
@@ -1060,72 +1336,114 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
           </button>
         </div>
 
-        {/* BUSCA NO QUADRO */}
-        <div style={{ position: 'relative' }}>
-          <input
-            type="text"
-            placeholder="🔍 Buscar por nome, loja ou telefone..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              borderRadius: '10px',
-              background: '#1e293b',
-              border: '1px solid rgba(255,255,255,0.1)',
-              color: '#fff',
-              fontSize: '0.82rem',
-              boxSizing: 'border-box',
-              outline: 'none'
-            }}
-          />
-          {searchTerm && (
-            <button
-              onClick={() => setSearchTerm('')}
+        {/* BUSCA NO QUADRO E BOTÃO NÃO LIDAS */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+            <input
+              type="text"
+              placeholder="🔍 Buscar nome, loja..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               style={{
-                position: 'absolute',
-                right: '8px',
-                top: detectedPhone && !existingLeadForPhone ? '22px' : '50%',
-                transform: 'translateY(-50%)',
-                background: 'none',
-                border: 'none',
-                color: '#94a3b8',
-                fontSize: '0.9rem',
-                cursor: 'pointer',
-                padding: '4px'
-              }}
-            >
-              ✕
-            </button>
-          )}
-
-          {detectedPhone && !existingLeadForPhone && (
-            <button
-              type="button"
-              onClick={openCreateLeadModalFromSearch}
-              style={{
-                marginTop: '8px',
                 width: '100%',
-                padding: '10px 14px',
+                padding: '8px 12px',
                 borderRadius: '10px',
-                background: 'linear-gradient(135deg, #ff6600, #ea580c)',
+                background: '#1e293b',
+                border: '1px solid rgba(255,255,255,0.1)',
                 color: '#fff',
-                border: 'none',
-                fontWeight: '700',
-                fontSize: '0.84rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                cursor: 'pointer',
-                boxShadow: '0 4px 14px rgba(255, 102, 0, 0.4)'
+                fontSize: '0.82rem',
+                boxSizing: 'border-box',
+                outline: 'none'
               }}
-            >
-              <span>➕</span>
-              <span>Salvar Lead: {detectedPhone}</span>
-            </button>
-          )}
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                style={{
+                  position: 'absolute',
+                  right: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setFilterUnread(prev => !prev)}
+            title="Filtrar apenas cards com mensagens ou marcados como não lidos"
+            style={{
+              flexShrink: 0,
+              padding: '8px 10px',
+              borderRadius: '10px',
+              border: filterUnread ? '1.5px solid #00a884' : '1px solid rgba(255,255,255,0.15)',
+              background: filterUnread ? 'rgba(0, 168, 132, 0.25)' : '#1e293b',
+              color: filterUnread ? '#25D366' : 'rgba(255,255,255,0.85)',
+              fontSize: '0.78rem',
+              fontWeight: filterUnread ? '800' : '600',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.15s ease',
+              boxShadow: filterUnread ? '0 0 10px rgba(0, 168, 132, 0.35)' : 'none'
+            }}
+          >
+            <span>📩</span>
+            <span>Não lidas</span>
+            {unreadCountTotal > 0 && (
+              <span style={{
+                background: filterUnread ? '#25D366' : '#00a884',
+                color: filterUnread ? '#000' : '#fff',
+                fontSize: '0.68rem',
+                fontWeight: '800',
+                borderRadius: '999px',
+                padding: '1px 6px',
+                minWidth: '16px',
+                textAlign: 'center'
+              }}>
+                {unreadCountTotal}
+              </span>
+            )}
+          </button>
         </div>
+
+        {detectedPhone && !existingLeadForPhone && (
+          <button
+            type="button"
+            onClick={openCreateLeadModalFromSearch}
+            style={{
+              marginTop: '8px',
+              width: '100%',
+              padding: '10px 14px',
+              borderRadius: '10px',
+              background: 'linear-gradient(135deg, #ff6600, #ea580c)',
+              color: '#fff',
+              border: 'none',
+              fontWeight: '700',
+              fontSize: '0.84rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              cursor: 'pointer',
+              boxShadow: '0 4px 14px rgba(255, 102, 0, 0.4)'
+            }}
+          >
+            <span>➕</span>
+            <span>Salvar Lead: {detectedPhone}</span>
+          </button>
+        )}
       </header>
 
       {/* QUADRO KANBAN COM COLUNAS LADO A LADO E ROLAGEM HORIZONTAL LIVRE */}
@@ -1137,7 +1455,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
         flexDirection: 'row',
         alignItems: 'flex-start',
         gap: '12px',
-        padding: '14px 14px 80px',
+        padding: '14px 14px 96px',
         WebkitOverflowScrolling: 'touch',
         minHeight: 'calc(100vh - 150px)'
       }}>
@@ -1163,7 +1481,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                 border: '1px solid rgba(255,255,255,0.07)',
                 display: 'flex',
                 flexDirection: 'column',
-                maxHeight: 'calc(100vh - 170px)',
+                maxHeight: 'calc(100vh - 220px)',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
                 flexShrink: 0
               }}
@@ -1246,6 +1564,9 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                       copilotoSnippet = afterTag.split('\n\n')[0].replace(/^-\s*/, '').trim();
                     }
 
+                    const isUnread = isLeadUnread(lead);
+                    const unreadNum = Number(lead.unreadCount ?? lead.unread_count ?? lead.unread_messages ?? lead.msg_nao_lidas ?? 0);
+
                     return (
                       <div
                         key={lead.id}
@@ -1267,6 +1588,25 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
                           transition: 'transform 0.1s ease'
                         }}
                       >
+                        {/* INDICADOR DE MENSAGEM / CARD NÃO LIDO */}
+                        {isUnread && (
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            background: 'rgba(0, 168, 132, 0.12)',
+                            border: '1px solid rgba(0, 168, 132, 0.35)',
+                            color: '#00a884',
+                            fontSize: '0.68rem',
+                            fontWeight: '800',
+                            alignSelf: 'flex-start'
+                          }}>
+                            <span>📩</span>
+                            <span>{unreadNum > 0 ? `${unreadNum} msg não lida${unreadNum > 1 ? 's' : ''}` : 'Não lida'}</span>
+                          </div>
+                        )}
                         {/* CABEÇALHO DO CARD: NOME E BOTÕES DE AÇÃO RÁPIDA */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
                           <div style={{
@@ -1585,26 +1925,49 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
               </div>
             </div>
 
-            {/* SELETOR DE ETAPA NO HEADER DO MODAL */}
-            <select
-              value={activeModalLead.lista || activeModalLead.status || stages[0]?.id}
-              onChange={(e) => handleMoveStage(activeModalLead, e.target.value)}
-              style={{
-                background: '#111b21',
-                border: '1px solid rgba(255,255,255,0.2)',
-                color: '#38bdf8',
-                padding: '6px 8px',
-                borderRadius: '8px',
-                fontSize: '0.72rem',
-                fontWeight: '700',
-                maxWidth: '120px'
-              }}
-            >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={(e) => handleToggleMarkUnread(e, activeModalLead)}
+                title={isLeadUnread(activeModalLead) ? "Marcar como lida" : "Marcar como não lida"}
+                style={{
+                  background: isLeadUnread(activeModalLead) ? 'rgba(0, 168, 132, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                  border: isLeadUnread(activeModalLead) ? '1px solid #00a884' : '1px solid rgba(255, 255, 255, 0.15)',
+                  color: isLeadUnread(activeModalLead) ? '#25D366' : '#94a3b8',
+                  padding: '6px 8px',
+                  borderRadius: '8px',
+                  fontSize: '0.72rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px'
+                }}
+              >
+                📩 {isLeadUnread(activeModalLead) ? 'Não lida' : 'Marcar não lida'}
+              </button>
+
+              {/* SELETOR DE ETAPA NO HEADER DO MODAL */}
+              <select
+                value={activeModalLead.lista || activeModalLead.status || stages[0]?.id}
+                onChange={(e) => handleMoveStage(activeModalLead, e.target.value)}
+                style={{
+                  background: '#111b21',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#38bdf8',
+                  padding: '6px 8px',
+                  borderRadius: '8px',
+                  fontSize: '0.72rem',
+                  fontWeight: '700',
+                  maxWidth: '110px'
+                }}
+              >
               {stages.map(s => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
           </div>
+        </div>
 
           {/* ABAS DO MODAL: [💬 WhatsApp] e [📋 Dados do Lead] */}
           <div style={{
@@ -2537,32 +2900,251 @@ export default function MobileKanban({ onNavigate, onModalStateChange }) {
         </div>
       )}
 
-      {/* BOTÃO FLUTUANTE CREMOSA AI */}
-      <button
-        onClick={() => onNavigate('gigamente')}
-        style={{
+      {/* MODAL / BOTTOM SHEET DE GESTÃO DE USUÁRIOS E PERMISSÕES (ADMIN) */}
+      {showAdminModal && (
+        <div style={{
           position: 'fixed',
-          bottom: '20px',
-          right: '16px',
-          background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-          border: 'none',
-          color: '#fff',
-          padding: '10px 16px',
-          borderRadius: '999px',
-          fontWeight: '800',
-          fontSize: '0.82rem',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.8)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 1500,
           display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          boxShadow: '0 6px 20px rgba(245, 158, 11, 0.45)',
-          cursor: 'pointer',
-          zIndex: 900
-        }}
-      >
-        <span>🧁</span>
-        <span>CReMosa AI</span>
-        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#22c55e', display: 'inline-block' }} />
-      </button>
+          flexDirection: 'column',
+          justifyContent: 'flex-end'
+        }}>
+          <div style={{
+            background: '#161b22',
+            borderTopLeftRadius: '24px',
+            borderTopRightRadius: '24px',
+            border: '1px solid rgba(255,255,255,0.12)',
+            maxHeight: '88vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              padding: '18px 20px',
+              borderBottom: '1px solid rgba(255,255,255,0.08)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '700', color: '#fff' }}>⚙️ Gestão de Usuários e Permissões</h3>
+                <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: 'rgba(255,255,255,0.6)' }}>
+                  Controle de acessos aos sistemas GigaHub
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAdminModal(false)}
+                style={{
+                  background: 'rgba(255,255,255,0.1)',
+                  border: 'none',
+                  color: '#fff',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  fontSize: '1rem',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
+              <div style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '14px',
+                padding: '16px',
+                marginBottom: '24px'
+              }}>
+                <h4 style={{ margin: '0 0 12px', fontSize: '0.95rem', fontWeight: '600', color: '#ff6600' }}>
+                  + Cadastrar Novo Usuário
+                </h4>
+
+                <form onSubmit={handleCreateUser} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <input
+                    type="text"
+                    placeholder="Nome Completo"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    style={adminInputStyle}
+                  />
+                  <input
+                    type="email"
+                    placeholder="E-mail de Acesso"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    style={adminInputStyle}
+                    required
+                  />
+                  <input
+                    type="password"
+                    placeholder="Senha"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    style={adminInputStyle}
+                    required
+                  />
+
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)' }}>Cargo:</span>
+                    <button
+                      type="button"
+                      onClick={() => setNewRole('user')}
+                      style={{
+                        ...adminRoleBtnStyle,
+                        background: newRole === 'user' ? '#00a884' : 'rgba(255,255,255,0.08)'
+                      }}
+                    >
+                      Operador (User)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewRole('admin')}
+                      style={{
+                        ...adminRoleBtnStyle,
+                        background: newRole === 'admin' ? '#6366f1' : 'rgba(255,255,255,0.08)'
+                      }}
+                    >
+                      Admin
+                    </button>
+                  </div>
+
+                  <div style={{ marginTop: '6px' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '6px' }}>
+                      Sistemas Permitidos:
+                    </span>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {[
+                        { id: 'gigamente', label: '🧠 GigaMente' },
+                        { id: 'gigacrm', label: '🎯 Giga CRM' },
+                        { id: 'predios', label: '🏢 Gestor Prédios' },
+                        { id: 'consorcios', label: '🤝 Gestor Consórcios' }
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => handleToggleSystem(item.id)}
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: '8px',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            background: newSystems.includes(item.id) ? 'rgba(255,102,0,0.25)' : 'rgba(255,255,255,0.05)',
+                            color: newSystems.includes(item.id) ? '#ff8800' : 'rgba(255,255,255,0.6)',
+                            fontSize: '0.78rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {newSystems.includes(item.id) ? '✓ ' : ''}{item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {adminError && <div style={{ color: '#f87171', fontSize: '0.8rem', marginTop: '4px' }}>{adminError}</div>}
+                  {adminSuccess && <div style={{ color: '#4ade80', fontSize: '0.8rem', marginTop: '4px' }}>{adminSuccess}</div>}
+
+                  <button
+                    type="submit"
+                    disabled={isCreatingUser}
+                    style={{
+                      marginTop: '8px',
+                      padding: '12px',
+                      background: '#ff6600',
+                      border: 'none',
+                      borderRadius: '10px',
+                      color: '#fff',
+                      fontWeight: '600',
+                      fontSize: '0.9rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {isCreatingUser ? 'Salvando...' : 'Salvar Usuário'}
+                  </button>
+                </form>
+              </div>
+
+              <div>
+                <h4 style={{ margin: '0 0 12px', fontSize: '0.95rem', fontWeight: '600', color: '#fff' }}>
+                  Usuários Ativos ({usersList.length})
+                </h4>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {usersList.map((u) => (
+                    <div
+                      key={u.id || u.email}
+                      style={{
+                        padding: '12px 14px',
+                        background: 'rgba(255,255,255,0.04)',
+                        border: '1px solid rgba(255,255,255,0.07)',
+                        borderRadius: '12px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: '600', fontSize: '0.9rem', color: '#fff' }}>{u.name || u.email}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>{u.email}</div>
+                        <div style={{ fontSize: '0.72rem', color: '#ff8800', marginTop: '2px' }}>
+                          Acessos: {Array.isArray(u.accessible_systems) && u.accessible_systems.length > 0
+                            ? u.accessible_systems.map(s => {
+                                const norm = s === 'meucrm' ? 'gigacrm' : s;
+                                if (norm === 'gigamente') return 'GigaMente';
+                                if (norm === 'gigacrm') return 'Giga CRM';
+                                if (norm === 'predios') return 'Gestor Prédios';
+                                if (norm === 'consorcios') return 'Gestor Consórcios';
+                                return norm;
+                              }).join(', ')
+                            : 'Todos'}
+                        </div>
+                      </div>
+
+                      <span style={{
+                        fontSize: '0.72rem',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        background: u.role === 'admin' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.1)',
+                        color: u.role === 'admin' ? '#818cf8' : 'rgba(255,255,255,0.7)',
+                        fontWeight: '600'
+                      }}>
+                        {u.role === 'admin' ? 'ADMIN' : 'USER'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+const adminInputStyle = {
+  width: '100%',
+  padding: '10px 12px',
+  borderRadius: '8px',
+  background: 'rgba(0,0,0,0.3)',
+  border: '1px solid rgba(255,255,255,0.15)',
+  color: '#fff',
+  fontSize: '0.85rem',
+  boxSizing: 'border-box'
+};
+
+const adminRoleBtnStyle = {
+  padding: '6px 12px',
+  borderRadius: '8px',
+  border: 'none',
+  color: '#fff',
+  fontSize: '0.75rem',
+  fontWeight: '600',
+  cursor: 'pointer'
+};

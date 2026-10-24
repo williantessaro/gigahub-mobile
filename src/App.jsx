@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import MobileLayout from './components/MobileLayout';
+import SystemBottomBar from './components/SystemBottomBar';
 import MobilePortal from './pages/MobilePortal';
 import MobileKanban from './pages/MobileKanban';
 import MobilePredios from './pages/MobilePredios';
@@ -11,14 +12,11 @@ import MobileGigaMente from './pages/MobileGigaMente';
 import MobileLogin from './pages/MobileLogin';
 import { biometricService } from './services/biometricService';
 
-// Mapeia o pathname atual para a página correspondente
+// Mapeia o pathname atual para a página correspondente (Padrão inicial: GigaCRM Kanban)
 const getPageFromPath = (path) => {
   const cleanPath = path.replace(/\/$/, '');
   if (cleanPath.endsWith('/gigacrm/conversas') || cleanPath.endsWith('/meucrm/conversas') || cleanPath.endsWith('/messages')) {
     return 'messages';
-  }
-  if (cleanPath.endsWith('/gigacrm') || cleanPath.endsWith('/meucrm') || cleanPath.endsWith('/kanban')) {
-    return 'gigacrm';
   }
   if (cleanPath.endsWith('/clients')) {
     return 'clients';
@@ -32,7 +30,7 @@ const getPageFromPath = (path) => {
   if (cleanPath.endsWith('/consorcios')) {
     return 'consorcios';
   }
-  return 'portal';
+  return 'gigacrm';
 };
 
 // Mapeia a página interna para o pathname correspondente
@@ -40,10 +38,6 @@ const getPathFromPage = (page) => {
   switch (page) {
     case 'messages':
       return '/mobile/gigacrm/conversas';
-    case 'gigacrm':
-    case 'meucrm':
-    case 'kanban':
-      return '/mobile/gigacrm';
     case 'clients':
       return '/mobile/clients';
     case 'gigamente':
@@ -52,9 +46,12 @@ const getPathFromPage = (page) => {
       return '/mobile/predios';
     case 'consorcios':
       return '/mobile/consorcios';
+    case 'gigacrm':
+    case 'meucrm':
+    case 'kanban':
     case 'portal':
     default:
-      return '/mobile';
+      return '/mobile/gigacrm';
   }
 };
 
@@ -93,8 +90,13 @@ function App() {
       CapApp.addListener('backButton', () => {
         if (isChildModalActiveRef.current) {
           setIsChildModalActive(false);
-        } else if (currentPageRef.current !== 'portal') {
-          navigateTo('portal');
+        } else if (
+          currentPageRef.current !== 'gigacrm' &&
+          currentPageRef.current !== 'meucrm' &&
+          currentPageRef.current !== 'kanban' &&
+          currentPageRef.current !== 'portal'
+        ) {
+          navigateTo('gigacrm');
         } else {
           CapApp.exitApp();
         }
@@ -202,7 +204,7 @@ function App() {
   const handleLogin = (userData) => {
     setUser(userData);
     localStorage.setItem('crm-user', JSON.stringify(userData));
-    setCurrentPage('portal');
+    setCurrentPage('gigacrm');
   };
 
   const handleLogout = () => {
@@ -210,7 +212,7 @@ function App() {
     localStorage.removeItem('crm-user');
     biometricService.clearCredentials();
     setUser(null);
-    setCurrentPage('portal');
+    setCurrentPage('gigacrm');
   };
 
   if (checking) {
@@ -219,7 +221,7 @@ function App() {
         minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: '#0a0a0c', color: '#ff6600'
       }}>
-        <div className="animate-pulse" style={{ fontSize: '1.2rem', fontWeight: '700' }}>GigaHub Portal...</div>
+        <div className="animate-pulse" style={{ fontSize: '1.2rem', fontWeight: '700' }}>Giga CRM...</div>
       </div>
     );
   }
@@ -228,30 +230,46 @@ function App() {
     return <MobileLogin onLogin={handleLogin} />;
   }
 
-  // Telas que possuem layout e cabeçalho próprio
-  if (currentPage === 'portal') {
-    return <MobilePortal user={user} onNavigate={navigateTo} onLogout={handleLogout} />;
-  }
-
+  // Telas principais com rodapé global dos 4 sistemas
   if (currentPage === 'gigamente') {
-    return <MobileGigaMente onNavigate={navigateTo} />;
-  }
-
-  if (currentPage === 'gigacrm' || currentPage === 'meucrm' || currentPage === 'kanban') {
     return (
-      <MobileKanban 
-        onNavigate={navigateTo} 
-        onModalStateChange={(isOpen) => setIsChildModalActive(isOpen)} 
-      />
+      <>
+        <MobileGigaMente onNavigate={navigateTo} />
+        {!isChildModalActive && <SystemBottomBar currentPage={currentPage} onNavigate={navigateTo} />}
+      </>
     );
   }
 
   if (currentPage === 'predios') {
-    return <MobilePredios onNavigate={navigateTo} />;
+    return (
+      <>
+        <MobilePredios onNavigate={navigateTo} />
+        {!isChildModalActive && <SystemBottomBar currentPage={currentPage} onNavigate={navigateTo} />}
+      </>
+    );
   }
 
   if (currentPage === 'consorcios') {
-    return <MobileConsorcios onNavigate={navigateTo} />;
+    return (
+      <>
+        <MobileConsorcios onNavigate={navigateTo} />
+        {!isChildModalActive && <SystemBottomBar currentPage={currentPage} onNavigate={navigateTo} />}
+      </>
+    );
+  }
+
+  if (currentPage === 'gigacrm' || currentPage === 'meucrm' || currentPage === 'kanban' || currentPage === 'portal') {
+    return (
+      <>
+        <MobileKanban 
+          user={user}
+          onLogout={handleLogout}
+          onNavigate={navigateTo} 
+          onModalStateChange={(isOpen) => setIsChildModalActive(isOpen)} 
+        />
+        {!isChildModalActive && <SystemBottomBar currentPage="gigacrm" onNavigate={navigateTo} />}
+      </>
+    );
   }
 
   // Telas do CRM clássico (Conversas e Clientes)

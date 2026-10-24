@@ -23,9 +23,11 @@ export default function MobilePredios({ onNavigate }) {
       color: '#fff',
       display: 'flex',
       flexDirection: 'column',
+      paddingBottom: '90px',
+      boxSizing: 'border-box',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     }}>
-      {/* Header com Botão Voltar ao Portal */}
+      {/* Header do Gestor Prédios */}
       <div style={{
         padding: '14px 16px',
         backgroundColor: '#161b22',
@@ -37,25 +39,8 @@ export default function MobilePredios({ onNavigate }) {
         top: 0,
         zIndex: 100
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button
-            onClick={() => onNavigate('portal')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              background: 'rgba(255, 255, 255, 0.08)',
-              border: 'none',
-              color: '#ff8800',
-              padding: '6px 10px',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-          >
-            ← Portal
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '1.4rem', lineHeight: 1 }}>🏢</span>
           <div>
             <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '700', color: '#fff' }}>Gestor Prédios</h2>
             <p style={{ margin: 0, fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Condomínios e Manutenções</p>
