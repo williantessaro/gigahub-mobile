@@ -54,7 +54,7 @@ export default function MobileKanban({ onNavigate, onModalStateChange, user, onL
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterUnread, setFilterUnread] = useState(false);
+  const [filterUnread, setFilterUnread] = useState(true);
   const [transferringId, setTransferringId] = useState(null);
   const [draggedLead, setDraggedLead] = useState(null);
 
