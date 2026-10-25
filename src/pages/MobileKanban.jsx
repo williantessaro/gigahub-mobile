@@ -25,7 +25,7 @@ const DEFAULT_POS_VENDAS_STAGES = [
   { id: 'Concluído', name: 'Concluído', color: '#16a34a', icon: 'check_circle' }
 ];
 
-export default function MobileKanban({ onNavigate, onModalStateChange, user, onLogout }) {
+export default function MobileKanban({ onNavigate, onModalStateChange, onRegisterBackHandler, user, onLogout }) {
   // Estados de Gestão de Usuários (Admin)
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [usersList, setUsersList] = useState([]);
@@ -358,12 +358,103 @@ export default function MobileKanban({ onNavigate, onModalStateChange, user, onL
     }
   };
 
-  // Notifica o App se algum modal estiver aberto (para controle do botão Voltar nativo do Android)
+  // Referência atualizada dos modais abertos e trava anti-duplo disparo para o gesto Voltar do Android
+  const modalsRef = useRef({});
+  const lastBackHandledAtRef = useRef(0);
+  const prevAnyModalOpenRef = useRef(false);
+
+  modalsRef.current = {
+    isScheduleOpen,
+    quickMoveLead,
+    activeModalLead,
+    isCreateLeadModalOpen,
+    isCreatingFunnel,
+    isCreatingStage,
+    showAdminModal
+  };
+
+  // Notifica o App se algum modal estiver aberto e gerencia o histórico para o gesto Voltar do Android
   useEffect(() => {
+    const anyOpen = Boolean(
+      activeModalLead ||
+      isScheduleOpen ||
+      quickMoveLead ||
+      isCreatingFunnel ||
+      isCreatingStage ||
+      isCreateLeadModalOpen ||
+      showAdminModal
+    );
+
     if (onModalStateChange) {
-      onModalStateChange(Boolean(activeModalLead || isScheduleOpen || quickMoveLead || isCreatingFunnel || isCreatingStage || isCreateLeadModalOpen || showAdminModal));
+      onModalStateChange(anyOpen);
     }
+
+    // Ao abrir um card/modal, empurra um estado no History API para que o gesto de voltar do WebView/Android dispare popstate se necessário
+    if (anyOpen && !prevAnyModalOpenRef.current) {
+      try {
+        window.history.pushState({ kanbanModal: true }, '');
+      } catch (e) {}
+    }
+    prevAnyModalOpenRef.current = anyOpen;
   }, [activeModalLead, isScheduleOpen, quickMoveLead, isCreatingFunnel, isCreatingStage, isCreateLeadModalOpen, showAdminModal, onModalStateChange]);
+
+  // Registra o tratador do botão/gesto Voltar nativo do Android junto ao App
+  useEffect(() => {
+    const handleBackAction = () => {
+      const now = Date.now();
+      if (now - lastBackHandledAtRef.current < 180) {
+        return true;
+      }
+
+      const m = modalsRef.current;
+      if (m.isScheduleOpen) {
+        lastBackHandledAtRef.current = now;
+        setIsScheduleOpen(false);
+        return true;
+      }
+      if (m.quickMoveLead) {
+        lastBackHandledAtRef.current = now;
+        setQuickMoveLead(null);
+        return true;
+      }
+      if (m.activeModalLead) {
+        lastBackHandledAtRef.current = now;
+        setActiveModalLead(null);
+        return true;
+      }
+      if (m.isCreateLeadModalOpen) {
+        lastBackHandledAtRef.current = now;
+        setIsCreateLeadModalOpen(false);
+        return true;
+      }
+      if (m.isCreatingFunnel) {
+        lastBackHandledAtRef.current = now;
+        setIsCreatingFunnel(false);
+        return true;
+      }
+      if (m.isCreatingStage) {
+        lastBackHandledAtRef.current = now;
+        setIsCreatingStage(false);
+        return true;
+      }
+      if (m.showAdminModal) {
+        lastBackHandledAtRef.current = now;
+        setShowAdminModal(false);
+        return true;
+      }
+      return false;
+    };
+
+    if (onRegisterBackHandler) {
+      onRegisterBackHandler(handleBackAction);
+    }
+
+    return () => {
+      if (onRegisterBackHandler) {
+        onRegisterBackHandler(null);
+      }
+    };
+  }, [onRegisterBackHandler]);
 
   // Carregar lista de funis da API
   const loadFunnelsList = async () => {

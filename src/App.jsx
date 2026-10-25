@@ -64,6 +64,7 @@ function App() {
 
   const currentPageRef = useRef(currentPage);
   const isChildModalActiveRef = useRef(isChildModalActive);
+  const childBackHandlerRef = useRef(null);
 
   useEffect(() => {
     currentPageRef.current = currentPage;
@@ -88,9 +89,14 @@ function App() {
 
     try {
       CapApp.addListener('backButton', () => {
+        if (childBackHandlerRef.current && childBackHandlerRef.current()) {
+          return;
+        }
         if (isChildModalActiveRef.current) {
           setIsChildModalActive(false);
-        } else if (
+          return;
+        }
+        if (
           currentPageRef.current !== 'gigacrm' &&
           currentPageRef.current !== 'meucrm' &&
           currentPageRef.current !== 'kanban' &&
@@ -108,6 +114,9 @@ function App() {
     }
 
     const handlePopState = () => {
+      if (childBackHandlerRef.current && childBackHandlerRef.current()) {
+        return;
+      }
       const page = getPageFromPath(window.location.pathname);
       setCurrentPage(page);
     };
@@ -265,7 +274,8 @@ function App() {
           user={user}
           onLogout={handleLogout}
           onNavigate={navigateTo} 
-          onModalStateChange={(isOpen) => setIsChildModalActive(isOpen)} 
+          onModalStateChange={(isOpen) => setIsChildModalActive(isOpen)}
+          onRegisterBackHandler={(fn) => { childBackHandlerRef.current = fn; }}
         />
         {!isChildModalActive && <SystemBottomBar currentPage="gigacrm" onNavigate={navigateTo} />}
       </>
