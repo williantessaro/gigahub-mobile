@@ -82,6 +82,20 @@ public class UpdateApk {
                 Files.copy(capConfig.toPath(), capTarget, StandardCopyOption.REPLACE_EXISTING);
                 System.out.println("Atualizado: /assets/capacitor.config.json");
             }
+
+            // 5. Incrementar versionCode no AndroidManifest.xml binario (offset 3700) para evitar conflito de update no Android
+            Path manifestPath = fs.getPath("/AndroidManifest.xml");
+            if (Files.exists(manifestPath)) {
+                byte[] manifestBytes = Files.readAllBytes(manifestPath);
+                if (manifestBytes.length > 3704 && manifestBytes[3699] == 0x10) {
+                    manifestBytes[3700] = 25; // versionCode = 25
+                    manifestBytes[3701] = 0;
+                    manifestBytes[3702] = 0;
+                    manifestBytes[3703] = 0;
+                    Files.write(manifestPath, manifestBytes, StandardOpenOption.TRUNCATE_EXISTING);
+                    System.out.println("Atualizado versionCode no AndroidManifest.xml para 25");
+                }
+            }
         }
 
         System.out.println("Sucesso: Arquivos empacotados no APK.");
