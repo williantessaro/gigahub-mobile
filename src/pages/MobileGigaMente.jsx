@@ -1026,6 +1026,17 @@ export default function MobileGigaMente({ onNavigate }) {
   // =========================================================================
   // FUNÇÕES DO MÓDULO GIGA VÍDEOS NO MOBILE
   // =========================================================================
+  // Resolve URLs de mídia (/api/v1/videos/... ou /downloads/...) quando rodando dentro do APK Android nativo (localhost)
+  const resolveMediaUrl = (rawUrl) => {
+    if (!rawUrl || typeof rawUrl !== 'string') return '';
+    if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+      return rawUrl;
+    }
+    const isApkLocal = window.location.hostname === 'localhost' || window.location.hostname === '';
+    const base = isApkLocal ? (localStorage.getItem('crm_server_url') || 'https://app.gigahub.site') : '';
+    return base ? `${base.replace(/\/$/, '')}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}` : rawUrl;
+  };
+
   const fetchVideoStudioSummary = async () => {
     try {
       const res = await fetch('/backend/api/videos/summary', { headers: getAuthHeaders() });
@@ -1433,7 +1444,7 @@ export default function MobileGigaMente({ onNavigate }) {
 
   // Compartilhamento Nativo no Celular (WhatsApp, Reels, TikTok, Telegram)
   const handleShareVideo = async (job) => {
-    const rawUrl = job?.video_url || `/api/v1/videos/jobs/${job?.id}/download`;
+    const rawUrl = resolveMediaUrl(job?.video_url || `/api/v1/videos/jobs/${job?.id}/download`);
     const fullUrl = rawUrl.startsWith('http') ? rawUrl : `${window.location.origin}${rawUrl}`;
     try {
       if (navigator.share) {
@@ -2085,7 +2096,7 @@ export default function MobileGigaMente({ onNavigate }) {
                           <video
                             controls
                             playsInline
-                            src={msg.meta.video_url}
+                            src={resolveMediaUrl(msg.meta.video_url)}
                             style={{
                               width: '100%',
                               maxHeight: '340px',
@@ -2117,7 +2128,7 @@ export default function MobileGigaMente({ onNavigate }) {
                               📲 Compartilhar
                             </button>
                             <a
-                              href={msg.meta.job_id ? `/api/v1/videos/jobs/${msg.meta.job_id}/download` : `${msg.meta.video_url}?download=1`}
+                              href={resolveMediaUrl(msg.meta.job_id ? `/api/v1/videos/jobs/${msg.meta.job_id}/download` : `${msg.meta.video_url}?download=1`)}
                               download={`GigaVideo-${msg.meta.job_id || 'clone'}.mp4`}
                               style={{
                                 flex: 1,
@@ -2452,7 +2463,7 @@ export default function MobileGigaMente({ onNavigate }) {
                           }}
                         >
                           <img
-                            src={clone.photo_url}
+                            src={resolveMediaUrl(clone.photo_url)}
                             alt={clone.name}
                             style={{ width: '38px', height: '38px', borderRadius: '50%', objectFit: 'cover', border: '1px solid #a855f7' }}
                           />
@@ -3095,7 +3106,7 @@ export default function MobileGigaMente({ onNavigate }) {
                         <video
                           controls
                           playsInline
-                          src={job.video_url}
+                          src={resolveMediaUrl(job.video_url)}
                           style={{
                             width: '100%',
                             maxHeight: '380px',
@@ -3128,7 +3139,7 @@ export default function MobileGigaMente({ onNavigate }) {
                               📲 Compartilhar
                             </button>
                             <a
-                              href={`/api/v1/videos/jobs/${job.id}/download`}
+                              href={resolveMediaUrl(`/api/v1/videos/jobs/${job.id}/download`)}
                               download={`GigaVideo-${job.id}.mp4`}
                               style={{
                                 flex: 1,
@@ -3863,7 +3874,7 @@ export default function MobileGigaMente({ onNavigate }) {
                       }}
                     >
                       <img
-                        src={clone.photo_url}
+                        src={resolveMediaUrl(clone.photo_url)}
                         alt={clone.name}
                         style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '1px solid #a855f7' }}
                       />

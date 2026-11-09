@@ -47,8 +47,8 @@ window.fetch = async function (resource, init) {
     const currentBase = getServerUrl();
     const primaryUrl = currentBase ? `${currentBase.replace(/\/$/, '')}${resource}` : resource;
     
-    // GigaMente e transcrição de áudio exigem timeout maior (90s) para o modelo processar
-    const isGigaMenteOrMedia = resource.includes('/gigamente') || resource.includes('/send-media');
+    // GigaMente, Giga Vídeos e envio de mídia exigem timeout maior (90s)
+    const isGigaMenteOrMedia = resource.includes('/gigamente') || resource.includes('/send-media') || resource.includes('/videos');
     const reqTimeout = isGigaMenteOrMedia ? 90000 : 15000;
 
     try {
