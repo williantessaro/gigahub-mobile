@@ -62,6 +62,10 @@ function App() {
   const [openTagsModalTrigger, setOpenTagsModalTrigger] = useState(0);
   const [isChildModalActive, setIsChildModalActive] = useState(false);
 
+  // Estado do Verificador de Atualização OTA / APK no Servidor
+  const [availableUpdate, setAvailableUpdate] = useState(null);
+  const [isApplyingOta, setIsApplyingOta] = useState(false);
+
   const currentPageRef = useRef(currentPage);
   const isChildModalActiveRef = useRef(isChildModalActive);
   const childBackHandlerRef = useRef(null);
@@ -130,6 +134,170 @@ function App() {
       }
     };
   }, []);
+
+  // Verificador Automático de Versão (Roda sempre que abre o APK ou volta para o App)
+  const checkMobileServerVersion = async () => {
+    try {
+      const res = await fetch('/backend/api/mobile/version');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.success) return;
+
+      const runningBuild = window.__GIGAHUB_RUNNING_BUILD__ || window.__GIGAHUB_EMBEDDED_BUILD__ || '';
+      const runningVersion = Number(window.__GIGAHUB_RUNNING_VERSION__ || window.__GIGAHUB_EMBEDDED_VERSION__ || 27);
+      const serverBuild = data.buildHash || '';
+      const serverVersion = Number(data.versionCode || 27);
+
+      const hasNewerVersion = serverVersion > runningVersion;
+      const hasNewerBuild = Boolean(runningBuild && serverBuild && serverBuild !== runningBuild && serverVersion >= runningVersion);
+
+      if (hasNewerVersion || hasNewerBuild) {
+        setAvailableUpdate({
+          currentVersion: runningVersion,
+          serverVersion,
+          versionName: data.versionName || `2.${serverVersion}`,
+          buildHash: serverBuild,
+          scriptUrl: data.scriptUrl,
+          cssUrl: data.cssUrl,
+          apkDownloadUrl: data.apkDownloadUrl || 'https://app.gigahub.site/downloads/gigahub-mobile.apk',
+          changelog: data.changelog || 'Novos recursos e melhorias disponíveis no GigaHub Mobile.'
+        });
+      }
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    checkMobileServerVersion();
+    let stateListener = null;
+    try {
+      CapApp.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) checkMobileServerVersion();
+      }).then(h => { stateListener = h; });
+    } catch (_) {}
+
+    return () => {
+      if (stateListener && typeof stateListener.remove === 'function') {
+        stateListener.remove();
+      }
+    };
+  }, []);
+
+  const handleApplyInstantOtaUpdate = () => {
+    if (!availableUpdate) return;
+    setIsApplyingOta(true);
+    try {
+      if (availableUpdate.scriptUrl && availableUpdate.buildHash) {
+        localStorage.setItem('gigahub_ota_bundle', JSON.stringify({
+          versionCode: availableUpdate.serverVersion,
+          versionName: availableUpdate.versionName,
+          buildHash: availableUpdate.buildHash,
+          scriptUrl: availableUpdate.scriptUrl,
+          cssUrl: availableUpdate.cssUrl || '',
+          updatedAt: new Date().toISOString()
+        }));
+      }
+      setTimeout(() => {
+        window.location.reload();
+      }, 400);
+    } catch (_) {
+      setIsApplyingOta(false);
+    }
+  };
+
+  const renderUpdateBanner = () => {
+    if (!availableUpdate) return null;
+    return (
+      <div style={{
+        position: 'fixed',
+        top: '12px',
+        left: '12px',
+        right: '12px',
+        zIndex: 99999,
+        background: 'linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%)',
+        border: '1px solid rgba(168, 85, 247, 0.65)',
+        borderRadius: '16px',
+        padding: '14px 16px',
+        boxShadow: '0 14px 36px rgba(0, 0, 0, 0.65)',
+        color: '#fff'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '1.35rem' }}>🚀</span>
+            <div>
+              <div style={{ fontWeight: '800', fontSize: '0.92rem', color: '#f3e8ff' }}>
+                Nova Versão Disponível (v{availableUpdate.serverVersion})
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                Versão atual: v{availableUpdate.currentVersion} • Atualização pronta no servidor
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAvailableUpdate(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#94a3b8',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              padding: '2px 6px'
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ fontSize: '0.78rem', color: '#cbd5e1', marginBottom: '12px', lineHeight: '1.4' }}>
+          {availableUpdate.changelog}
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {availableUpdate.scriptUrl && (
+            <button
+              type="button"
+              onClick={handleApplyInstantOtaUpdate}
+              disabled={isApplyingOta}
+              style={{
+                flex: 2,
+                minWidth: '175px',
+                padding: '10px 12px',
+                borderRadius: '10px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #9333ea 0%, #ec4899 100%)',
+                color: '#fff',
+                fontWeight: '800',
+                fontSize: '0.8rem',
+                cursor: 'pointer'
+              }}
+            >
+              {isApplyingOta ? '⏳ Atualizando App...' : '⚡ Atualizar Agora (Sem baixar APK)'}
+            </button>
+          )}
+          <a
+            href={availableUpdate.apkDownloadUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              flex: 1,
+              minWidth: '120px',
+              padding: '10px 10px',
+              borderRadius: '10px',
+              border: '1px solid rgba(255,255,255,0.2)',
+              background: 'rgba(255,255,255,0.06)',
+              color: '#e2e8f0',
+              fontWeight: '700',
+              fontSize: '0.76rem',
+              textDecoration: 'none',
+              textAlign: 'center'
+            }}
+          >
+            📥 Baixar APK
+          </a>
+        </div>
+      </div>
+    );
+  };
 
   // Autenticação Resiliente e Auto-Relogin com credenciais salvas
   useEffect(() => {
@@ -236,13 +404,19 @@ function App() {
   }
 
   if (!user) {
-    return <MobileLogin onLogin={handleLogin} />;
+    return (
+      <>
+        {renderUpdateBanner()}
+        <MobileLogin onLogin={handleLogin} />
+      </>
+    );
   }
 
   // Telas principais com rodapé global dos 4 sistemas
   if (currentPage === 'gigamente') {
     return (
       <>
+        {renderUpdateBanner()}
         <MobileGigaMente onNavigate={navigateTo} />
         {!isChildModalActive && <SystemBottomBar currentPage={currentPage} onNavigate={navigateTo} />}
       </>
@@ -252,6 +426,7 @@ function App() {
   if (currentPage === 'predios') {
     return (
       <>
+        {renderUpdateBanner()}
         <MobilePredios onNavigate={navigateTo} />
         {!isChildModalActive && <SystemBottomBar currentPage={currentPage} onNavigate={navigateTo} />}
       </>
@@ -261,6 +436,7 @@ function App() {
   if (currentPage === 'consorcios') {
     return (
       <>
+        {renderUpdateBanner()}
         <MobileConsorcios onNavigate={navigateTo} />
         {!isChildModalActive && <SystemBottomBar currentPage={currentPage} onNavigate={navigateTo} />}
       </>
@@ -270,6 +446,7 @@ function App() {
   if (currentPage === 'gigacrm' || currentPage === 'meucrm' || currentPage === 'kanban' || currentPage === 'portal') {
     return (
       <>
+        {renderUpdateBanner()}
         <MobileKanban 
           user={user}
           onLogout={handleLogout}
@@ -284,22 +461,25 @@ function App() {
 
   // Telas do CRM clássico (Conversas e Clientes)
   return (
-    <MobileLayout 
-      currentPage={currentPage} 
-      onNavigate={navigateTo} 
-      onLogout={handleLogout}
-      onOpenTags={() => {
-        navigateTo('messages');
-        setOpenTagsModalTrigger(prev => prev + 1);
-      }}
-      user={user}
-    >
-      {currentPage === 'clients' ? (
-        <MobileClients onNavigate={navigateTo} />
-      ) : (
-        <MobileMessages openTagsTrigger={openTagsModalTrigger} user={user} onNavigate={navigateTo} />
-      )}
-    </MobileLayout>
+    <>
+      {renderUpdateBanner()}
+      <MobileLayout 
+        currentPage={currentPage} 
+        onNavigate={navigateTo} 
+        onLogout={handleLogout}
+        onOpenTags={() => {
+          navigateTo('messages');
+          setOpenTagsModalTrigger(prev => prev + 1);
+        }}
+        user={user}
+      >
+        {currentPage === 'clients' ? (
+          <MobileClients onNavigate={navigateTo} />
+        ) : (
+          <MobileMessages openTagsTrigger={openTagsModalTrigger} user={user} onNavigate={navigateTo} />
+        )}
+      </MobileLayout>
+    </>
   );
 }
 
