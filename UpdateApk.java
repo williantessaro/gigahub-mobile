@@ -88,12 +88,12 @@ public class UpdateApk {
             if (Files.exists(manifestPath)) {
                 byte[] manifestBytes = Files.readAllBytes(manifestPath);
                 if (manifestBytes.length > 3704 && manifestBytes[3699] == 0x10) {
-                    manifestBytes[3700] = 27; // versionCode = 27
+                    manifestBytes[3700] = 28; // versionCode = 28
                     manifestBytes[3701] = 0;
                     manifestBytes[3702] = 0;
                     manifestBytes[3703] = 0;
                     Files.write(manifestPath, manifestBytes, StandardOpenOption.TRUNCATE_EXISTING);
-                    System.out.println("Atualizado versionCode no AndroidManifest.xml para 27");
+                    System.out.println("Atualizado versionCode no AndroidManifest.xml para 28");
                 }
             }
         }
