@@ -91,6 +91,9 @@ export default function MobileGigaMente({ onNavigate }) {
   const [isImprovingScript, setIsImprovingScript] = useState(false);
   const [isDictatingScript, setIsDictatingScript] = useState(false);
   const scriptDictationRef = useRef(null);
+  const [jobSceneMediaBase64, setJobSceneMediaBase64] = useState('');
+  const [jobSceneMediaType, setJobSceneMediaType] = useState('');
+  const [jobSceneMediaName, setJobSceneMediaName] = useState('');
 
   // Formulário de Criação / Atualização de Avatar (Foto, Vídeo 2-em-1 e Gravação de Voz)
   const [newCloneName, setNewCloneName] = useState('');
@@ -1364,6 +1367,25 @@ export default function MobileGigaMente({ onNavigate }) {
     }
   };
 
+  // Selecionar Foto ou Vídeo de Cena na hora do pedido
+  const handleSelectJobSceneMedia = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setJobSceneMediaBase64(String(reader.result || ''));
+      setJobSceneMediaType(isVideo ? 'video' : 'image');
+      setJobSceneMediaName(file.name || (isVideo ? 'cena.mp4' : 'cena.jpg'));
+      setVideoActionFeedback(
+        isVideo
+          ? `🎥 Vídeo de cena "${file.name}" anexado ao pedido! O motor usará este vídeo em movimento com sua voz.`
+          : `📸 Foto de cena "${file.name}" anexada ao pedido! O motor animará esta cena mantendo o enquadramento.`
+      );
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Criar Vídeo na Fila
   const handleCreateVideoJob = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -1386,7 +1408,9 @@ export default function MobileGigaMente({ onNavigate }) {
           clone_name: selectedCloneName.trim(),
           script_text: videoScriptText.trim(),
           aspect_ratio: videoAspectRatio,
-          session_id: activeSessionId
+          session_id: activeSessionId,
+          scene_media_base64: jobSceneMediaBase64 || null,
+          scene_media_type: jobSceneMediaType || null
         })
       });
       const data = await res.json();
@@ -1405,6 +1429,9 @@ export default function MobileGigaMente({ onNavigate }) {
       }
 
       setVideoScriptText('');
+      setJobSceneMediaBase64('');
+      setJobSceneMediaType('');
+      setJobSceneMediaName('');
       setShowQuickVideoSheet(false);
       setVideoActionFeedback(`🎬 Vídeo #${data.job.id} na fila! Acompanhe o progresso na Galeria.`);
       await fetchVideoStudioSummary();
@@ -2500,10 +2527,62 @@ export default function MobileGigaMente({ onNavigate }) {
                   </div>
                 </div>
 
-                {/* FORMATO DO VÍDEO */}
+                {/* PASSO 2: FOTO OU VÍDEO DA CENA DO PEDIDO + FORMATO */}
                 <div>
                   <label style={{ fontSize: '0.8rem', fontWeight: '700', color: '#cbd5e1', display: 'block', marginBottom: '6px' }}>
-                    2. Formato do Vídeo:
+                    2. Foto ou Vídeo desta Cena (Opcional — mantém seu enquadramento):
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                    <label
+                      style={{
+                        flex: 1,
+                        padding: '9px 12px',
+                        borderRadius: '10px',
+                        border: jobSceneMediaBase64 ? '1px solid #10b981' : '1px dashed rgba(168, 85, 247, 0.5)',
+                        background: jobSceneMediaBase64 ? 'rgba(16, 185, 129, 0.14)' : 'rgba(168, 85, 247, 0.08)',
+                        color: jobSceneMediaBase64 ? '#6ee7b7' : '#e9d5ff',
+                        fontSize: '0.76rem',
+                        fontWeight: '700',
+                        textAlign: 'center',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {jobSceneMediaBase64
+                        ? `${jobSceneMediaType === 'video' ? '🎥 Vídeo da cena:' : '📸 Foto da cena:'} ${jobSceneMediaName}`
+                        : '📸 / 🎥 Enviar Foto ou Vídeo para este pedido'}
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        onChange={handleSelectJobSceneMedia}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                    {jobSceneMediaBase64 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setJobSceneMediaBase64('');
+                          setJobSceneMediaType('');
+                          setJobSceneMediaName('');
+                        }}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          color: '#fca5a5',
+                          fontSize: '0.73rem',
+                          fontWeight: '700',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ✕ Usar padrão
+                      </button>
+                    )}
+                  </div>
+
+                  <label style={{ fontSize: '0.8rem', fontWeight: '700', color: '#cbd5e1', display: 'block', marginBottom: '6px' }}>
+                    Formato do Vídeo:
                   </label>
                   <div style={{ display: 'flex', gap: '6px' }}>
                     {[
@@ -3912,6 +3991,56 @@ export default function MobileGigaMente({ onNavigate }) {
                   + Enviar Foto / Vídeo / Voz
                 </button>
               </div>
+            </div>
+
+            {/* FOTO OU VÍDEO DA CENA DO PEDIDO */}
+            <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label
+                style={{
+                  flex: 1,
+                  padding: '8px 10px',
+                  borderRadius: '10px',
+                  border: jobSceneMediaBase64 ? '1px solid #10b981' : '1px dashed rgba(168, 85, 247, 0.5)',
+                  background: jobSceneMediaBase64 ? 'rgba(16, 185, 129, 0.14)' : 'rgba(168, 85, 247, 0.08)',
+                  color: jobSceneMediaBase64 ? '#6ee7b7' : '#e9d5ff',
+                  fontSize: '0.74rem',
+                  fontWeight: '700',
+                  textAlign: 'center',
+                  cursor: 'pointer'
+                }}
+              >
+                {jobSceneMediaBase64
+                  ? `${jobSceneMediaType === 'video' ? '🎥 Vídeo:' : '📸 Foto:'} ${jobSceneMediaName}`
+                  : '📸 / 🎥 Enviar Foto ou Vídeo para este pedido (Opcional)'}
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  onChange={handleSelectJobSceneMedia}
+                  style={{ display: 'none' }}
+                />
+              </label>
+              {jobSceneMediaBase64 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJobSceneMediaBase64('');
+                    setJobSceneMediaType('');
+                    setJobSceneMediaName('');
+                  }}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    color: '#fca5a5',
+                    fontSize: '0.72rem',
+                    fontWeight: '700',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ✕
+                </button>
+              )}
             </div>
 
             {/* ROTEIRO COM DITADO E IA */}
