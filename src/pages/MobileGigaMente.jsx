@@ -2612,11 +2612,11 @@ export default function MobileGigaMente({ onNavigate }) {
                   </div>
                 </div>
 
-                {/* PASSO 3: ROTEIRO (DIGITAR, DITAR POR VOZ OU CRIAR COM IA) */}
+                {/* PASSO 3: INSTRUÇÕES DE DIREÇÃO COM IA (OU TEXTO PRONTO) */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
                     <label style={{ fontSize: '0.82rem', fontWeight: '700', color: '#e2e8f0' }}>
-                      3. Roteiro que o Avatar vai falar:
+                      3. Instruções de Direção para a IA (O que fazer no vídeo):
                     </label>
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <button
@@ -2633,11 +2633,12 @@ export default function MobileGigaMente({ onNavigate }) {
                           cursor: 'pointer'
                         }}
                       >
-                        {isDictatingScript ? '🛑 Parar Ditado' : '🎙️ Ditar Voz'}
+                        {isDictatingScript ? '🛑 Parar Ditado' : '🎙️ Ditar Instruções'}
                       </button>
                       <button
                         type="button"
-                        onClick={() => setShowAiScriptBox(!showAiScriptBox)}
+                        onClick={handleImproveScriptWithAi}
+                        disabled={isImprovingScript}
                         style={{
                           padding: '5px 10px',
                           borderRadius: '999px',
@@ -2649,86 +2650,36 @@ export default function MobileGigaMente({ onNavigate }) {
                           cursor: 'pointer'
                         }}
                       >
-                        ✨ Roteiro com IA
+                        {isImprovingScript ? '⏳ Escrevendo...' : '✨ Pré-visualizar Roteiro'}
                       </button>
                     </div>
                   </div>
 
-                  {/* CAIXA EXPANSÍVEL DO ASSISTENTE DE ROTEIRO IA */}
-                  {showAiScriptBox && (
-                    <div style={{
-                      background: 'rgba(168, 85, 247, 0.1)',
-                      border: '1px solid rgba(168, 85, 247, 0.35)',
-                      borderRadius: '12px',
-                      padding: '10px',
-                      marginBottom: '10px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px'
-                    }}>
-                      <div style={{ fontSize: '0.76rem', color: '#e9d5ff', fontWeight: '600' }}>
-                        ✨ Explique a ideia, o tema ou o contexto do vídeo e o GigaMente escreve o script pronto para sua voz:
-                      </div>
-                      <textarea
-                        rows={2}
-                        value={aiScriptPrompt}
-                        onChange={e => setAiScriptPrompt(e.target.value)}
-                        placeholder="Ex: Crie um vídeo curto de 15 segundos falando sobre como o GigaHub automatiza vendas no WhatsApp com IA..."
-                        style={{
-                          width: '100%',
-                          boxSizing: 'border-box',
-                          padding: '8px 10px',
-                          borderRadius: '8px',
-                          border: '1px solid rgba(255,255,255,0.15)',
-                          background: '#0b141a',
-                          color: '#fff',
-                          fontSize: '0.82rem'
-                        }}
-                      />
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <select
-                          value={aiScriptTone}
-                          onChange={e => setAiScriptTone(e.target.value)}
-                          style={{
-                            flex: 1,
-                            padding: '8px',
-                            borderRadius: '8px',
-                            background: '#0b141a',
-                            color: '#e2e8f0',
-                            border: '1px solid rgba(255,255,255,0.15)',
-                            fontSize: '0.76rem'
-                          }}
-                        >
-                          <option value="natural, confiante e persuasivo">Tom: Confiante & Comercial</option>
-                          <option value="descontraído, próximo e amigável">Tom: Descontraído & Reels</option>
-                          <option value="executivo, direto e autoridade">Tom: Autoridade & Executivo</option>
-                        </select>
-                        <button
-                          type="button"
-                          onClick={handleImproveScriptWithAi}
-                          disabled={isImprovingScript}
-                          style={{
-                            padding: '8px 14px',
-                            borderRadius: '8px',
-                            border: 'none',
-                            background: 'linear-gradient(135deg, #a855f7, #ec4899)',
-                            color: '#fff',
-                            fontWeight: '800',
-                            fontSize: '0.78rem',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {isImprovingScript ? '⏳ Gerando...' : '✨ Escrever Script'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                    <select
+                      value={aiScriptTone}
+                      onChange={e => setAiScriptTone(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '8px',
+                        borderRadius: '8px',
+                        background: '#0b141a',
+                        color: '#e2e8f0',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        fontSize: '0.76rem'
+                      }}
+                    >
+                      <option value="natural, confiante e persuasivo">Estilo: Confiante & Comercial (Gesticulação Expansiva)</option>
+                      <option value="descontraído, próximo e amigável">Estilo: Descontraído & Reels (Dinâmico e Próximo)</option>
+                      <option value="executivo, direto e autoridade">Estilo: Autoridade & Executivo (Postura Firme)</option>
+                    </select>
+                  </div>
 
                   <textarea
                     rows={4}
                     value={videoScriptText}
                     onChange={e => setVideoScriptText(e.target.value)}
-                    placeholder="Digite aqui o texto que seu Avatar vai falar (ou toque em '✨ Roteiro com IA' acima)..."
+                    placeholder="Instrua a IA sobre o vídeo: tema, ação, postura, o que você quer vender ou apresentar (ou digite o roteiro exato se preferir)..."
                     style={{
                       width: '100%',
                       boxSizing: 'border-box',
@@ -2741,6 +2692,9 @@ export default function MobileGigaMente({ onNavigate }) {
                       lineHeight: '1.45'
                     }}
                   />
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '4px' }}>
+                    💡 Se você digitar apenas a instrução (ex: <em>"faça um vídeo chamando os clientes pro feirão"</em>), a IA gera automaticamente a fala real e os gestos humanos no vídeo.
+                  </div>
                 </div>
 
                 <button
