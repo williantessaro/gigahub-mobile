@@ -88,6 +88,7 @@ export default function MobileGigaMente({ onNavigate }) {
   const [showAiScriptBox, setShowAiScriptBox] = useState(false);
   const [aiScriptPrompt, setAiScriptPrompt] = useState('');
   const [aiScriptTone, setAiScriptTone] = useState('natural, confiante e persuasivo');
+  const [videoDurationSec, setVideoDurationSec] = useState(15);
   const [isImprovingScript, setIsImprovingScript] = useState(false);
   const [isDictatingScript, setIsDictatingScript] = useState(false);
   const scriptDictationRef = useRef(null);
@@ -1407,6 +1408,8 @@ export default function MobileGigaMente({ onNavigate }) {
         body: JSON.stringify({
           clone_name: selectedCloneName.trim(),
           script_text: videoScriptText.trim(),
+          prompt_instruction: videoScriptText.trim(),
+          duration_seconds: videoDurationSec,
           aspect_ratio: videoAspectRatio,
           session_id: activeSessionId,
           scene_media_base64: jobSceneMediaBase64 || null,
@@ -2584,7 +2587,7 @@ export default function MobileGigaMente({ onNavigate }) {
                   <label style={{ fontSize: '0.8rem', fontWeight: '700', color: '#cbd5e1', display: 'block', marginBottom: '6px' }}>
                     Formato do Vídeo:
                   </label>
-                  <div style={{ display: 'flex', gap: '6px' }}>
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
                     {[
                       { val: '9:16', label: '📱 Vertical 9:16 (Reels)' },
                       { val: '16:9', label: '🖥️ Horizontal 16:9' },
@@ -2607,6 +2610,36 @@ export default function MobileGigaMente({ onNavigate }) {
                         }}
                       >
                         {fmt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <label style={{ fontSize: '0.8rem', fontWeight: '700', color: '#cbd5e1', display: 'block', marginBottom: '6px' }}>
+                    ⏱️ Duração Alvo do Vídeo:
+                  </label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {[
+                      { sec: 10, label: '⚡ 10 segundos' },
+                      { sec: 20, label: '⏱️ 20 segundos' },
+                      { sec: 30, label: '🎬 30 segundos' }
+                    ].map(dur => (
+                      <button
+                        key={dur.sec}
+                        type="button"
+                        onClick={() => setVideoDurationSec(dur.sec)}
+                        style={{
+                          flex: 1,
+                          padding: '8px 4px',
+                          borderRadius: '8px',
+                          border: videoDurationSec === dur.sec ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                          background: videoDurationSec === dur.sec ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255,255,255,0.03)',
+                          color: videoDurationSec === dur.sec ? '#fff' : '#94a3b8',
+                          fontWeight: videoDurationSec === dur.sec ? '700' : '500',
+                          fontSize: '0.73rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {dur.label}
                       </button>
                     ))}
                   </div>
