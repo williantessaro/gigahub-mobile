@@ -7,11 +7,12 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
   const [adminError, setAdminError] = useState('');
   const [adminSuccess, setAdminSuccess] = useState('');
 
-  // Estados para novo usuário
+  // Estados para novo / editar usuário
+  const [editingUserId, setEditingUserId] = useState(null);
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newName, setNewName] = useState('');
-  const [newRole, setNewRole] = useState('user');
+  const [newRole, setNewRole] = useState('vendedor');
   const [newSystems, setNewSystems] = useState(['gigacrm']);
   const [isCreating, setIsCreating] = useState(false);
 
@@ -93,59 +94,81 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
     }
   };
 
+  const startEditUser = (u) => {
+    setAdminError('');
+    setAdminSuccess('');
+    setEditingUserId(u.id);
+    setNewName(u.name || '');
+    setNewEmail(u.email || '');
+    setNewPassword('');
+    const systems = Array.isArray(u.accessible_systems) && u.accessible_systems.length > 0
+      ? u.accessible_systems.map(s => (s === 'meucrm' ? 'gigacrm' : s))
+      : ['gigacrm'];
+    setNewSystems(systems);
+    setNewRole(u.role === 'admin' ? 'admin' : (u.role === 'socio' ? 'socio' : 'vendedor'));
+  };
+
+  const cancelEditUser = () => {
+    setEditingUserId(null);
+    setNewName('');
+    setNewEmail('');
+    setNewPassword('');
+    setNewRole('vendedor');
+    setNewSystems(['gigacrm']);
+  };
+
   const handleCreateUser = async (e) => {
     e.preventDefault();
-    if (!newEmail || !newPassword) return;
+    if (!newEmail || (!editingUserId && !newPassword)) return;
     setIsCreating(true);
     setAdminError('');
     setAdminSuccess('');
 
+    const isWrOnly = newRole !== 'admin' && newSystems.length === 1 && newSystems[0] === 'wrglobal';
+    const effectiveRole = newRole === 'admin' ? 'admin' : (isWrOnly ? 'socio' : newRole);
+    const payload = {
+      email: newEmail.trim().toLowerCase(),
+      name: newName,
+      role: effectiveRole,
+      accessible_systems: newSystems.length > 0 ? newSystems : ['gigacrm']
+    };
+    if (newPassword) payload.password = newPassword;
+
     try {
       const token = localStorage.getItem('portal_token') || localStorage.getItem('crm-token');
-      let res = await fetch('/api/users', {
-        method: 'POST',
+      const url = editingUserId ? `/api/users/${editingUserId}` : '/api/users';
+      const method = editingUserId ? 'PUT' : 'POST';
+      let res = await fetch(url, {
+        method,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          email: newEmail,
-          password: newPassword,
-          name: newName,
-          role: newRole,
-          accessible_systems: newSystems
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
-        res = await fetch('/api/admin/users', {
-          method: 'POST',
+        const fallbackUrl = editingUserId ? `/api/admin/users/${editingUserId}` : '/api/admin/users';
+        res = await fetch(fallbackUrl, {
+          method,
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({
-            email: newEmail,
-            password: newPassword,
-            name: newName,
-            role: newRole,
-            accessible_systems: newSystems
-          })
+          body: JSON.stringify(payload)
         });
       }
 
       if (res.ok) {
-        setAdminSuccess('Usuário cadastrado com sucesso!');
-        setNewEmail('');
-        setNewPassword('');
-        setNewName('');
+        setAdminSuccess(editingUserId ? 'Usuário atualizado com sucesso!' : 'Usuário cadastrado com sucesso!');
+        cancelEditUser();
         fetchUsers();
       } else {
         const errData = await res.json().catch(() => ({}));
-        setAdminError(errData.error || 'Erro ao criar usuário');
+        setAdminError(errData.error || 'Erro ao salvar usuário');
       }
     } catch (err) {
-      setAdminError('Erro de conexão ao criar usuário');
+      setAdminError('Erro de conexão ao salvar usuário');
     } finally {
       setIsCreating(false);
     }
@@ -424,9 +447,20 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
                 padding: '16px',
                 marginBottom: '24px'
               }}>
-                <h4 style={{ margin: '0 0 12px', fontSize: '0.95rem', fontWeight: '600', color: '#ff6600' }}>
-                  + Cadastrar Novo Usuário
-                </h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '600', color: '#ff6600' }}>
+                    {editingUserId ? '✏️ Editar Usuário' : '+ Cadastrar Novo Usuário'}
+                  </h4>
+                  {editingUserId && (
+                    <button
+                      type="button"
+                      onClick={cancelEditUser}
+                      style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '6px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer' }}
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                </div>
 
                 <form onSubmit={handleCreateUser} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <input
@@ -446,24 +480,34 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
                   />
                   <input
                     type="password"
-                    placeholder="Senha"
+                    placeholder={editingUserId ? 'Nova Senha (deixe vazio para manter)' : 'Senha'}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     style={inputStyle}
-                    required
+                    required={!editingUserId}
                   />
 
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)' }}>Cargo:</span>
                     <button
                       type="button"
-                      onClick={() => setNewRole('user')}
+                      onClick={() => setNewRole('vendedor')}
                       style={{
                         ...roleBtnStyle,
-                        background: newRole === 'user' ? '#00a884' : 'rgba(255,255,255,0.08)'
+                        background: newRole === 'vendedor' ? '#00a884' : 'rgba(255,255,255,0.08)'
                       }}
                     >
-                      Operador (User)
+                      Vendedor
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewRole('socio')}
+                      style={{
+                        ...roleBtnStyle,
+                        background: newRole === 'socio' ? '#8b5cf6' : 'rgba(255,255,255,0.08)'
+                      }}
+                    >
+                      Sócio
                     </button>
                     <button
                       type="button"
@@ -483,8 +527,9 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
                     </span>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       {[
-                        { id: 'gigamente', label: '🧠 GigaMente' },
+                        { id: 'wrglobal', label: '📦 WR Global' },
                         { id: 'gigacrm', label: '🎯 Giga CRM' },
+                        { id: 'gigamente', label: '🧠 GigaMente' },
                         { id: 'predios', label: '🏢 Gestor Prédios' },
                         { id: 'consorcios', label: '🤝 Gestor Consórcios' }
                       ].map((item) => (
@@ -541,14 +586,16 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
                   {usersList.map((u) => (
                     <div
                       key={u.id || u.email}
+                      onClick={() => startEditUser(u)}
                       style={{
                         padding: '12px 14px',
-                        background: 'rgba(255,255,255,0.04)',
-                        border: '1px solid rgba(255,255,255,0.07)',
+                        background: editingUserId === u.id ? 'rgba(255,102,0,0.12)' : 'rgba(255,255,255,0.04)',
+                        border: editingUserId === u.id ? '1px solid #ff6600' : '1px solid rgba(255,255,255,0.07)',
                         borderRadius: '12px',
                         display: 'flex',
                         justifyContent: 'space-between',
-                        alignItems: 'center'
+                        alignItems: 'center',
+                        cursor: 'pointer'
                       }}
                     >
                       <div>
@@ -558,6 +605,7 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
                           Acessos: {Array.isArray(u.accessible_systems) && u.accessible_systems.length > 0
                             ? u.accessible_systems.map(s => {
                                 const norm = s === 'meucrm' ? 'gigacrm' : s;
+                                if (norm === 'wrglobal') return 'WR Global';
                                 if (norm === 'gigamente') return 'GigaMente';
                                 if (norm === 'gigacrm') return 'Giga CRM';
                                 if (norm === 'predios') return 'Gestor Prédios';
@@ -568,16 +616,19 @@ export default function MobilePortal({ user, onNavigate, onLogout }) {
                         </div>
                       </div>
 
-                      <span style={{
-                        fontSize: '0.72rem',
-                        padding: '3px 8px',
-                        borderRadius: '6px',
-                        background: u.role === 'admin' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.1)',
-                        color: u.role === 'admin' ? '#818cf8' : 'rgba(255,255,255,0.7)',
-                        fontWeight: '600'
-                      }}>
-                        {u.role === 'admin' ? 'ADMIN' : 'USER'}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                        <span style={{
+                          fontSize: '0.72rem',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          background: u.role === 'admin' ? 'rgba(99,102,241,0.2)' : (u.role === 'socio' ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.1)'),
+                          color: u.role === 'admin' ? '#818cf8' : (u.role === 'socio' ? '#c4b5fd' : 'rgba(255,255,255,0.7)'),
+                          fontWeight: '600'
+                        }}>
+                          {u.role === 'admin' ? 'ADMIN' : (u.role === 'socio' ? 'SÓCIO' : 'USER')}
+                        </span>
+                        <span style={{ fontSize: '0.68rem', color: '#38bdf8' }}>✏️ Editar</span>
+                      </div>
                     </div>
                   ))}
                 </div>
