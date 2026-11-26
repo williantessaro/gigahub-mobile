@@ -100,6 +100,8 @@ export default function MobileGigaMente({ onNavigate }) {
   const [newCloneName, setNewCloneName] = useState('');
   const [newCloneGender, setNewCloneGender] = useState('M');
   const [newClonePhotoBase64, setNewClonePhotoBase64] = useState('');
+  const [newCloneMatrixVideoBase64, setNewCloneMatrixVideoBase64] = useState('');
+  const [newCloneMatrixVideoName, setNewCloneMatrixVideoName] = useState('');
   const [newCloneVoiceBase64, setNewCloneVoiceBase64] = useState('');
   const [newCloneVoiceName, setNewCloneVoiceName] = useState('');
   const [isSavingClone, setIsSavingClone] = useState(false);
@@ -1261,6 +1263,7 @@ export default function MobileGigaMente({ onNavigate }) {
           name: newCloneName.trim(),
           gender: newCloneGender,
           photo_base64: newClonePhotoBase64,
+          matrix_video_base64: newCloneMatrixVideoBase64 || null,
           voice_sample_base64: newCloneVoiceBase64 || null
         })
       });
@@ -2993,6 +2996,50 @@ export default function MobileGigaMente({ onNavigate }) {
                         ✅ Amostra pronta: {newCloneVoiceName}
                       </div>
                     )}
+                  </div>
+
+                  {/* VÍDEO MATRIZ DE MOVIMENTO REAL (CAMINHO 1 - AVATAR EM VÍDEO REAL) */}
+                  <div style={{
+                    background: 'rgba(56, 189, 248, 0.08)',
+                    border: '1px solid rgba(56, 189, 248, 0.35)',
+                    borderRadius: '10px',
+                    padding: '10px'
+                  }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '700', color: '#7dd3fc', marginBottom: '4px' }}>
+                      🎥 3. Vídeo Real de Movimento (Recomendado — 5 a 15 segundos):
+                    </div>
+                    <div style={{ fontSize: '0.71rem', color: '#cbd5e1', marginBottom: '8px' }}>
+                      Grave você no celular andando, gesticulando ou no showroom. O motor usará o seu corpo e caminhada reais para sempre e sincronizará sua voz e boca em todos os vídeos novos!
+                    </div>
+                    <label style={{
+                      display: 'block',
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      background: newCloneMatrixVideoBase64 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(56, 189, 248, 0.18)',
+                      border: newCloneMatrixVideoBase64 ? '1px solid #10b981' : '1px solid rgba(56, 189, 248, 0.5)',
+                      color: newCloneMatrixVideoBase64 ? '#6ee7b7' : '#e0f2fe',
+                      fontWeight: '700',
+                      fontSize: '0.76rem',
+                      textAlign: 'center',
+                      cursor: 'pointer'
+                    }}>
+                      {newCloneMatrixVideoBase64 ? `✅ Vídeo Matriz: ${newCloneMatrixVideoName}` : '📹 Escolher Vídeo com Movimento Real'}
+                      <input
+                        type="file"
+                        accept="video/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const r = new FileReader();
+                          r.onload = () => {
+                            setNewCloneMatrixVideoBase64(String(r.result || ''));
+                            setNewCloneMatrixVideoName(file.name || 'video_matriz.mp4');
+                          };
+                          r.readAsDataURL(file);
+                        }}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
                   </div>
 
                   <button
